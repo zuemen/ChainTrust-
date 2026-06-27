@@ -2,6 +2,7 @@ import type { VerifiableCredential } from "@veramo/core";
 import type { ChainTrustAgent } from "./agent.js";
 import type { ChainGateway } from "./chain/gateway.js";
 import { revocationKeyOf } from "./issuer.js";
+import { scoreTransaction, type TxContext, type RiskAssessment } from "./fraud.js";
 import { getAddress, computeAddress } from "ethers";
 
 export interface VerifyChecks {
@@ -15,6 +16,13 @@ export interface VerifyResult {
   checks: VerifyChecks;
   issuerAddress?: string;
   reason?: string;
+}
+
+export interface VerifyAndScoreResult extends VerifyResult {
+  /** 憑證有效時的 AI 風險評估；憑證無效則不評分（undefined） */
+  risk?: RiskAssessment;
+  /** 綜合結論：approve（驗證通過且 AI pass）/ review / reject */
+  outcome: "approve" | "review" | "reject";
 }
 
 /**
@@ -82,6 +90,28 @@ export async function verifyCredential(
   }
 
   return { ok: true, checks, issuerAddress };
+}
+
+/**
+ * 整合 M2.1：驗證 VC 通過後呼叫 AI 反詐 /score，產生綜合決策。
+ * - 憑證無效 → outcome="reject"，不評分。
+ * - 憑證有效 → 依 AI decision：pass→approve、review→review、block→reject。
+ */
+export async function verifyAndScore(
+  agent: ChainTrustAgent,
+  chain: ChainGateway,
+  vc: VerifiableCredential,
+  txContext: TxContext,
+  opts?: { fraudBaseUrl?: string }
+): Promise<VerifyAndScoreResult> {
+  const v = await verifyCredential(agent, chain, vc);
+  if (!v.ok) {
+    return { ...v, outcome: "reject" };
+  }
+  const risk = await scoreTransaction(txContext, { baseUrl: opts?.fraudBaseUrl });
+  const outcome =
+    risk.decision === "block" ? "reject" : risk.decision === "review" ? "review" : "approve";
+  return { ...v, risk, outcome };
 }
 
 /**

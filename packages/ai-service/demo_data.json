@@ -1,0 +1,55 @@
+{
+  "description": "Live demo 用腳本化交易（正常 × 人頭）。送 POST /score 觀察 risk/decision/reasons。",
+  "samples": [
+    {
+      "label": "normal_payment",
+      "expect": "pass",
+      "ctx": {
+        "type": "PAYMENT", "amount": 1280, "oldbalanceOrg": 52000, "newbalanceOrig": 50720,
+        "oldbalanceDest": 8000, "newbalanceDest": 9280, "tx_count_1h": 1, "tx_count_24h": 4,
+        "device_changed": false, "mobile_realname_verified": true, "vc_age_days": 540,
+        "account_age_days": 900, "cross_institution_presentations": 2, "payee_risk": 0.05, "geo_jump": false
+      }
+    },
+    {
+      "label": "normal_cashin_salary",
+      "expect": "pass",
+      "ctx": {
+        "type": "CASH_IN", "amount": 42000, "oldbalanceOrg": 12000, "newbalanceOrig": 54000,
+        "oldbalanceDest": 0, "newbalanceDest": 0, "tx_count_1h": 0, "tx_count_24h": 2,
+        "device_changed": false, "mobile_realname_verified": true, "vc_age_days": 800,
+        "account_age_days": 1500, "cross_institution_presentations": 1, "payee_risk": 0.02, "geo_jump": false
+      }
+    },
+    {
+      "label": "mule_transfer_drain",
+      "expect": "block",
+      "ctx": {
+        "type": "TRANSFER", "amount": 920000, "oldbalanceOrg": 1000000, "newbalanceOrig": 0,
+        "oldbalanceDest": 5000, "newbalanceDest": 5000, "tx_count_1h": 8, "tx_count_24h": 41,
+        "device_changed": true, "mobile_realname_verified": false, "vc_age_days": 3,
+        "account_age_days": 2, "cross_institution_presentations": 13, "payee_risk": 0.92, "geo_jump": true
+      }
+    },
+    {
+      "label": "mule_cashout_unverified",
+      "expect": "block",
+      "ctx": {
+        "type": "CASH_OUT", "amount": 480000, "oldbalanceOrg": 500000, "newbalanceOrig": 1000,
+        "oldbalanceDest": 2000, "newbalanceDest": 2000, "tx_count_1h": 6, "tx_count_24h": 33,
+        "device_changed": true, "mobile_realname_verified": false, "vc_age_days": 5,
+        "account_age_days": 4, "cross_institution_presentations": 10, "payee_risk": 0.81, "geo_jump": true
+      }
+    },
+    {
+      "label": "review_verified_but_drain",
+      "expect": "review",
+      "ctx": {
+        "type": "CASH_OUT", "amount": 350000, "oldbalanceOrg": 400000, "newbalanceOrig": 20000,
+        "oldbalanceDest": 2000, "newbalanceDest": 2000, "tx_count_1h": 2, "tx_count_24h": 12,
+        "device_changed": false, "mobile_realname_verified": true, "vc_age_days": 300,
+        "account_age_days": 500, "cross_institution_presentations": 3, "payee_risk": 0.35, "geo_jump": false
+      }
+    }
+  ]
+}

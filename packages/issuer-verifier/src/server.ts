@@ -7,7 +7,8 @@ import {
   type ChainGateway,
 } from "./chain/gateway.js";
 import { issueKYCCredential, issueMobileRealNameCredential, revocationKeyOf } from "./issuer.js";
-import { verifyCredential } from "./verifier.js";
+import { verifyCredential, verifyAndScore } from "./verifier.js";
+import { scoreTransaction } from "./fraud.js";
 import { issuerAddressFromIdentifier } from "./credentialHash.js";
 import { config } from "./config.js";
 
@@ -87,6 +88,27 @@ async function main() {
       if (!vc) return res.status(400).json({ error: "缺 vc" });
       const result = await verifyCredential(agent, chain, vc);
       res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message ?? String(e) });
+    }
+  });
+
+  // 驗證 + AI 風險評分（M2.1 整合）：{ vc, tx } → { 驗證結果 + risk + outcome }
+  app.post("/verify-and-score", async (req, res) => {
+    try {
+      const { vc, tx } = req.body ?? {};
+      if (!vc) return res.status(400).json({ error: "缺 vc" });
+      const result = await verifyAndScore(agent, chain, vc, tx ?? {});
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message ?? String(e) });
+    }
+  });
+
+  // 純風險評分代理（轉呼叫 ai-service /score）
+  app.post("/score", async (req, res) => {
+    try {
+      res.json(await scoreTransaction(req.body ?? {}));
     } catch (e: any) {
       res.status(500).json({ error: e?.message ?? String(e) });
     }

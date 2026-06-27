@@ -42,6 +42,10 @@ interface IRevocationRegistry {
   - `presentKycMinimal(sdJwtVc, revealKeys)` → Holder 只揭露指定欄位（預設僅 `kycLevel`）。
   - `verifyKycSdJwtPresentation(chain, presentation, {minKycLevel})` → `{ ok, checks:{signature,trustedIssuer,notRevoked,predicate}, disclosed[], withheld[], payload }`；在缺完整 PII 下驗章，仍走 `isTrustedIssuer` + `isRevoked`，並評估 `kycLevel>=門檻` 述詞。
   - 簽/驗用 issuer 的 Secp256k1（ES256K，did:key 推導公鑰），實作於 `@sd-jwt/sd-jwt-vc`。
+- `fraud.ts` + `verifyAndScore`（M2.1 整合）
+  - `scoreTransaction(ctx, {baseUrl})` → 呼叫 ai-service `POST /score`；服務不可用時回 `decision:"review"` + `FRAUD_SERVICE_UNAVAILABLE`（不擋驗證）。
+  - `verifyAndScore(agent, chain, vc, txContext)` → 憑證有效才評分；`outcome`：pass→`approve`、review→`review`、block→`reject`；憑證無效直接 `reject`。
+  - server 端點：`POST /verify-and-score`（{vc, tx}）、`POST /score`（代理）。
 
 ### 2.3 ai-service（M2）
 
