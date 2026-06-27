@@ -90,6 +90,10 @@ POST /score
 - issuer-verifier：單元（issuer/verifier 純函式）+ e2e（簽發→驗證→撤銷→驗證失敗）。
 - ai-service：pytest（規則邊界 + 模型載入 smoke）。
 
+## 7. 現場 Demo 腳本
+
+見 [`DEMO.md`](DEMO.md)：五步操作、講稿重點、`pnpm demo` / `docker compose up` 啟動、`pnpm smoke` 自動驗證、疑難排解。
+
 ## 6. 不做（PoC 範圍外）
 
 - 正式 CHT API 串接（以 mock 代替）

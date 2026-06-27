@@ -1,0 +1,32 @@
+# 一鍵起整個 ChainTrust Demo（需 Docker Desktop 運行中）
+#   docker compose up --build
+#   → 錢包 http://localhost:5173
+services:
+  ai-service:
+    build:
+      context: .
+      dockerfile: packages/ai-service/Dockerfile
+    ports:
+      - "8000:8000"
+
+  issuer-verifier:
+    build:
+      context: .
+      dockerfile: packages/issuer-verifier/Dockerfile
+    environment:
+      CHAIN_MODE: memory
+      AI_SERVICE_URL: http://ai-service:8000
+      PORT: "3001"
+    ports:
+      - "3001:3001"
+    depends_on:
+      - ai-service
+
+  wallet:
+    build:
+      context: .
+      dockerfile: packages/wallet/Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - issuer-verifier

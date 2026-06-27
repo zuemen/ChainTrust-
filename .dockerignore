@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/*.joblib
+**/data
+.git
+**/.env
+**/coverage
+packages/contracts/artifacts
+packages/contracts/cache
+packages/contracts/typechain-types
