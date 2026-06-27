@@ -1,0 +1,61 @@
+# === Secrets — 絕不入庫 ===
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.key
+*.pem
+secrets/
+keystore/
+
+# === Node ===
+node_modules/
+dist/
+build/
+.cache/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# === Hardhat / Solidity ===
+packages/contracts/artifacts/
+packages/contracts/cache/
+packages/contracts/typechain-types/
+packages/contracts/coverage/
+packages/contracts/coverage.json
+deployments/*.local.json
+
+# === Python / AI service ===
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.joblib
+*.pkl
+data/raw/
+data/*.csv
+
+# === Veramo / SSI 本地資料庫 (含金鑰) ===
+**/*.sqlite
+**/*.sqlite3
+**/agent.db
+**/.veramo/
+
+# === Frontend (wallet) ===
+packages/wallet/dist/
+.vite/
+
+# === Editors / OS ===
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

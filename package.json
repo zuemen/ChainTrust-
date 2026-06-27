@@ -1,0 +1,19 @@
+{
+  "name": "chaintrust",
+  "version": "0.1.0",
+  "private": true,
+  "description": "鏈信 ChainTrust — SSI 金融身分錢包 + AI 反詐 PoC",
+  "license": "MIT",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "contracts:build": "pnpm --filter @chaintrust/contracts build",
+    "contracts:test": "pnpm --filter @chaintrust/contracts test",
+    "iv:build": "pnpm --filter @chaintrust/issuer-verifier build",
+    "iv:test": "pnpm --filter @chaintrust/issuer-verifier test",
+    "iv:e2e": "pnpm --filter @chaintrust/issuer-verifier e2e",
+    "test": "pnpm -r test"
+  }
+}
