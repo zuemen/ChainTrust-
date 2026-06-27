@@ -1,0 +1,290 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  issueKyc,
+  verifyPresentation,
+  health,
+  type TxContext,
+  type VerifyResponse,
+} from "./api.ts";
+import { parseSdJwt, buildPresentation, type ParsedSdJwt } from "./sdjwt.ts";
+
+const VC_KEY = "chaintrust.vc";
+
+// claim 中文標籤與是否屬敏感個資
+const CLAIM_LABELS: Record<string, { label: string; pii: boolean }> = {
+  kycLevel: { label: "KYC 等級", pii: false },
+  over18: { label: "已滿 18 歲", pii: false },
+  country: { label: "國籍", pii: true },
+  fullName: { label: "真實姓名", pii: true },
+  birthDate: { label: "出生日期", pii: true },
+};
+
+const REASON_LABELS: Record<string, string> = {
+  MULE_PATTERN: "人頭金流樣態（大額轉出後帳戶清空）",
+  NO_REALNAME: "未通過門號實名（CHT 電子卡）",
+  VELOCITY: "短時間高頻交易",
+  DEVICE_CHANGE: "裝置變更",
+  GEO_JUMP: "地理位置跳躍",
+  NEW_ACCOUNT: "新開帳戶",
+  HIGH_PAYEE_RISK: "收款方高風險",
+  CROSS_INST_REUSE: "跨機構頻繁出示",
+  MODEL_ANOMALY: "模型偵測到異常樣態",
+  FRAUD_SERVICE_UNAVAILABLE: "反詐服務暫時無法連線（保守標記）",
+};
+
+const SCENARIOS: Record<string, { title: string; desc: string; tx: TxContext }> = {
+  normal: {
+    title: "正常交易",
+    desc: "小額消費 NT$1,280，已實名、老帳戶",
+    tx: {
+      type: "PAYMENT", amount: 1280, oldbalanceOrg: 52000, newbalanceOrig: 50720,
+      mobile_realname_verified: true, account_age_days: 900, payee_risk: 0.05,
+      tx_count_1h: 1, tx_count_24h: 4,
+    },
+  },
+  mule: {
+    title: "高風險大額轉帳（疑似人頭）",
+    desc: "NT$920,000 轉出清空帳戶、未實名、新帳戶、裝置/地理異常",
+    tx: {
+      type: "TRANSFER", amount: 920000, oldbalanceOrg: 1000000, newbalanceOrig: 0,
+      mobile_realname_verified: false, tx_count_1h: 8, tx_count_24h: 41,
+      device_changed: true, geo_jump: true, account_age_days: 2, payee_risk: 0.92,
+      cross_institution_presentations: 13,
+    },
+  },
+};
+
+const REQUIRED_CLAIM = "kycLevel"; // 述詞 kycLevel>=2 必需
+
+type Stage = "wallet" | "consent" | "result";
+
+export function App() {
+  const [issuerDid, setIssuerDid] = useState<string>("");
+  const [online, setOnline] = useState<boolean | null>(null);
+  const [vc, setVc] = useState<string | null>(() => localStorage.getItem(VC_KEY));
+  const [holderDid, setHolderDid] = useState<string>(() => localStorage.getItem("chaintrust.holder") ?? "");
+  const [scenario, setScenario] = useState<keyof typeof SCENARIOS>("normal");
+  const [reveal, setReveal] = useState<Set<string>>(new Set([REQUIRED_CLAIM]));
+  const [stage, setStage] = useState<Stage>("wallet");
+  const [result, setResult] = useState<VerifyResponse | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>("");
+
+  const parsed: ParsedSdJwt | null = useMemo(() => {
+    if (!vc) return null;
+    try { return parseSdJwt(vc); } catch { return null; }
+  }, [vc]);
+
+  useEffect(() => {
+    health().then((h) => { setOnline(h.ok); setIssuerDid(h.issuerDid); }).catch(() => setOnline(false));
+  }, []);
+
+  async function handleIssue() {
+    setBusy(true); setError("");
+    try {
+      const r = await issueKyc();
+      localStorage.setItem(VC_KEY, r.vc);
+      localStorage.setItem("chaintrust.holder", r.holderDid);
+      setVc(r.vc); setHolderDid(r.holderDid);
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    finally { setBusy(false); }
+  }
+
+  function handleForget() {
+    localStorage.removeItem(VC_KEY);
+    setVc(null); setResult(null); setStage("wallet");
+  }
+
+  function toggleReveal(claim: string) {
+    if (claim === REQUIRED_CLAIM) return; // 必需，不可取消
+    setReveal((prev) => {
+      const next = new Set(prev);
+      next.has(claim) ? next.delete(claim) : next.add(claim);
+      return next;
+    });
+  }
+
+  async function handlePresent() {
+    if (!parsed) return;
+    setBusy(true); setError("");
+    try {
+      const presentation = buildPresentation(parsed, [...reveal]);
+      const res = await verifyPresentation(presentation, SCENARIOS[scenario].tx);
+      setResult(res); setStage("result");
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    finally { setBusy(false); }
+  }
+
+  const disclosableClaims = parsed?.disclosures.map((d) => d.claim) ?? [];
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="brand"><span className="logo">鏈</span>
+          <div><h1>ChainTrust 錢包</h1><p>自主權金融身分 · 一次 KYC、跨機構重用</p></div>
+        </div>
+        <div className={`status ${online ? "ok" : online === false ? "down" : ""}`}>
+          <span className="dot" />{online == null ? "連線中…" : online ? "服務已連線" : "服務未連線"}
+        </div>
+      </header>
+
+      {error && <div className="banner err">⚠ {error}</div>}
+      {online === false && (
+        <div className="banner warn">
+          後端未連線。請先啟動 issuer-verifier（<code>pnpm iv:dev</code>）與 ai-service。
+        </div>
+      )}
+
+      {/* 我的憑證 */}
+      <section className="card">
+        <div className="card-h"><h2>我的憑證</h2><span className="tag">發證：銀行 A（KYC Issuer）</span></div>
+        {!parsed ? (
+          <div className="empty">
+            <p>你的錢包還沒有 KYC 憑證。向 <b>銀行 A</b> 申請一張可重複使用的可驗證憑證（VC）。</p>
+            <button className="btn primary" disabled={busy || !online} onClick={handleIssue}>
+              {busy ? "申請中…" : "向銀行 A 申請 KYC 憑證"}
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div className="cred">
+              <div className="cred-row"><span>類型</span><b>KYCCredential（SD-JWT）</b></div>
+              <div className="cred-row"><span>發證者</span><code title={String(parsed.payload.iss)}>{shortDid(String(parsed.payload.iss))}</code></div>
+              <div className="cred-row"><span>持有者</span><code title={holderDid}>{shortDid(holderDid)}</code></div>
+            </div>
+            <p className="hint">🔒 以下欄位只存在你的錢包，出示時由你決定揭露哪些：</p>
+            <div className="chips">
+              {parsed.disclosures.map((d) => (
+                <span key={d.claim} className={`chip ${CLAIM_LABELS[d.claim]?.pii ? "pii" : ""}`}>
+                  {CLAIM_LABELS[d.claim]?.label ?? d.claim}：<b>{fmt(d.value)}</b>
+                </span>
+              ))}
+            </div>
+            <button className="btn ghost" onClick={handleForget}>刪除憑證</button>
+          </div>
+        )}
+      </section>
+
+      {/* 出示請求 */}
+      <section className="card">
+        <div className="card-h"><h2>出示請求</h2><span className="tag">來自：銀行 B / 商家（Verifier）</span></div>
+        <p>對方要求證明：<b>已完成 KYC（等級 ≥ 2）</b>。<br />
+          依最小揭露原則，你<b>不需</b>提供姓名、生日等個資。</p>
+        <div className="scen">
+          {(Object.keys(SCENARIOS) as (keyof typeof SCENARIOS)[]).map((k) => (
+            <label key={k} className={`scen-opt ${scenario === k ? "sel" : ""} ${k === "mule" ? "danger" : ""}`}>
+              <input type="radio" name="scen" checked={scenario === k} onChange={() => setScenario(k)} />
+              <div><b>{SCENARIOS[k].title}</b><p>{SCENARIOS[k].desc}</p></div>
+            </label>
+          ))}
+        </div>
+        <button className="btn primary" disabled={!parsed || !online} onClick={() => { setStage("consent"); setResult(null); }}>
+          檢視將揭露的資料 →
+        </button>
+      </section>
+
+      {/* 最小揭露同意 */}
+      {stage === "consent" && parsed && (
+        <div className="modal-bg" onClick={() => setStage("wallet")}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>最小揭露同意</h2>
+            <p className="hint">驗證方只會看到你<b>勾選</b>的欄位，其餘個資不會離開錢包。</p>
+            <div className="consent-list">
+              {disclosableClaims.map((claim) => {
+                const meta = CLAIM_LABELS[claim] ?? { label: claim, pii: false };
+                const checked = reveal.has(claim);
+                const required = claim === REQUIRED_CLAIM;
+                return (
+                  <label key={claim} className={`consent-row ${checked ? "on" : ""}`}>
+                    <input type="checkbox" checked={checked} disabled={required} onChange={() => toggleReveal(claim)} />
+                    <span className="cl-label">{meta.label}{required && <em> · 必需</em>}{meta.pii && <em className="pii-tag"> · 個資</em>}</span>
+                    <span className="cl-state">{checked ? "將揭露" : "不會揭露"}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="reveal-summary">
+              <div><span className="ok">將揭露</span> {[...reveal].map((c) => CLAIM_LABELS[c]?.label ?? c).join("、") || "—"}</div>
+              <div><span className="muted">不會揭露</span> {disclosableClaims.filter((c) => !reveal.has(c)).map((c) => CLAIM_LABELS[c]?.label ?? c).join("、") || "—"}</div>
+            </div>
+            <div className="modal-actions">
+              <button className="btn ghost" onClick={() => setStage("wallet")}>取消</button>
+              <button className="btn primary" disabled={busy} onClick={handlePresent}>{busy ? "出示中…" : "同意並出示"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 結果 */}
+      {stage === "result" && result && (
+        <section className="card result">
+          <Outcome r={result} />
+          <div className="checks">
+            <Check ok={result.verify.checks.signature} label="簽章有效" />
+            <Check ok={result.verify.checks.trustedIssuer} label="發證者受信任根背書" />
+            <Check ok={result.verify.checks.notRevoked} label="憑證未被撤銷" />
+            <Check ok={result.verify.checks.predicate} label="KYC 等級 ≥ 2" />
+          </div>
+
+          <div className="seen">
+            <h3>驗證方實際看到的欄位</h3>
+            <div className="chips">
+              {result.verify.disclosed.length === 0 && <span className="chip muted">（無，僅述詞）</span>}
+              {result.verify.disclosed.map((c) => <span key={c} className="chip on">{CLAIM_LABELS[c]?.label ?? c}</span>)}
+              {result.verify.withheld.map((c) => <span key={c} className="chip muted">🔒 {CLAIM_LABELS[c]?.label ?? c}</span>)}
+            </div>
+          </div>
+
+          {result.risk && (
+            <div className={`risk ${result.risk.decision}`}>
+              <div className="risk-head">
+                <span>AI 反詐風險</span>
+                <span className="risk-score">{result.risk.risk ?? "—"}<small>/100</small></span>
+              </div>
+              <div className="risk-decision">{decisionLabel(result.risk.decision)}</div>
+              {result.risk.reasons.length > 0 && (
+                <ul className="reasons">
+                  {result.risk.reasons.map((rc) => <li key={rc}>{REASON_LABELS[rc] ?? rc}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <button className="btn ghost" onClick={() => setStage("wallet")}>完成 · 回錢包</button>
+        </section>
+      )}
+
+      <footer>PoC · 僅測試網 · CHT 整合點為 mock｜<code>{shortDid(issuerDid)}</code></footer>
+    </div>
+  );
+}
+
+function Outcome({ r }: { r: VerifyResponse }) {
+  const map = {
+    approve: { cls: "approve", icon: "✅", title: "驗證通過 · 交易放行", sub: "已完成 KYC 且風險低" },
+    review: { cls: "review", icon: "⚠️", title: "需人工複核", sub: "憑證有效，但交易風險偏高" },
+    reject: { cls: "reject", icon: "⛔", title: "交易已攔截", sub: r.verify.ok ? "AI 判定高風險（疑似人頭/盜用）" : `憑證驗證失敗：${r.verify.reason ?? ""}` },
+  }[r.outcome];
+  return (
+    <div className={`outcome ${map.cls}`}>
+      <span className="oc-icon">{map.icon}</span>
+      <div><h2>{map.title}</h2><p>{map.sub}</p></div>
+    </div>
+  );
+}
+
+function Check({ ok, label }: { ok: boolean; label: string }) {
+  return <div className={`chk ${ok ? "y" : "n"}`}>{ok ? "✓" : "✗"} {label}</div>;
+}
+
+function decisionLabel(d: string) {
+  return d === "block" ? "決策：攔截 (block)" : d === "review" ? "決策：複核 (review)" : "決策：放行 (pass)";
+}
+function shortDid(did?: string) {
+  if (!did) return "—";
+  return did.length > 24 ? `${did.slice(0, 16)}…${did.slice(-6)}` : did;
+}
+function fmt(v: unknown) {
+  if (typeof v === "boolean") return v ? "是" : "否";
+  return String(v);
+}

@@ -8,6 +8,7 @@ import {
 } from "./chain/gateway.js";
 import { issueKYCCredential, issueMobileRealNameCredential, revocationKeyOf } from "./issuer.js";
 import { verifyCredential, verifyAndScore } from "./verifier.js";
+import { issueKycSdJwt, verifyKycSdJwtPresentation } from "./sdjwt.js";
 import { scoreTransaction } from "./fraud.js";
 import { issuerAddressFromIdentifier } from "./credentialHash.js";
 import { config } from "./config.js";
@@ -43,8 +44,48 @@ async function main() {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
 
+  // 簡易 CORS（PoC：允許錢包前端跨來源呼叫）
+  app.use((_req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Content-Type");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    if (_req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
+
   app.get("/health", (_req, res) => {
     res.json({ ok: true, chainMode: config.chainMode, issuerDid: issuer.did, issuerAddr });
+  });
+
+  // ── SD-JWT（M2.0/M2.2 錢包用）──
+  // 簽發 SD-JWT KYCCredential 給 holder（缺 holderDid 則自動建一個）
+  app.post("/sdjwt/issue", async (req, res) => {
+    try {
+      let { holderDid, subject } = req.body ?? {};
+      if (!holderDid) holderDid = (await createHolderDid(agent, `holder-${Date.now()}`)).did;
+      const vc = await issueKycSdJwt({ issuer, holderDid, subject }, agent);
+      res.json({ vc, holderDid, issuerDid: issuer.did });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message ?? String(e) });
+    }
+  });
+
+  // 驗證 SD-JWT 出示 + AI 風險評分 → 綜合 outcome
+  app.post("/sdjwt/verify", async (req, res) => {
+    try {
+      const { presentation, tx } = req.body ?? {};
+      if (!presentation) return res.status(400).json({ error: "缺 presentation" });
+      const verify = await verifyKycSdJwtPresentation(chain, presentation, { minKycLevel: 2 });
+      let risk;
+      let outcome: "approve" | "review" | "reject" = "reject";
+      if (verify.ok) {
+        risk = await scoreTransaction(tx ?? {});
+        outcome = risk.decision === "block" ? "reject" : risk.decision === "review" ? "review" : "approve";
+      }
+      res.json({ verify, risk, outcome });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message ?? String(e) });
+    }
   });
 
   // 建立一個新的 Holder DID（demo 用）

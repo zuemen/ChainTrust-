@@ -14,6 +14,14 @@
     "iv:build": "pnpm --filter @chaintrust/issuer-verifier build",
     "iv:test": "pnpm --filter @chaintrust/issuer-verifier test",
     "iv:e2e": "pnpm --filter @chaintrust/issuer-verifier e2e",
-    "test": "pnpm -r test"
+    "iv:dev": "pnpm --filter @chaintrust/issuer-verifier dev",
+    "wallet:dev": "pnpm --filter @chaintrust/wallet dev",
+    "wallet:build": "pnpm --filter @chaintrust/wallet build",
+    "ai:dev": "pnpm --filter @chaintrust/ai-service dev",
+    "ai:setup": "pnpm --filter @chaintrust/ai-service setup",
+    "ai:train": "pnpm --filter @chaintrust/ai-service train",
+    "demo": "powershell -ExecutionPolicy Bypass -File scripts/demo.ps1",
+    "test": "pnpm --filter @chaintrust/contracts --filter @chaintrust/issuer-verifier test",
+    "test:ai": "pnpm --filter @chaintrust/ai-service test"
   }
 }
