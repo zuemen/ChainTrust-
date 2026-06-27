@@ -101,7 +101,7 @@ export function issuerAddressFromDid(did: string): string {
 }
 
 /** 解析 did:key（Secp256k1）取出公鑰 hex（去除 multicodec 前綴 0xe701） */
-function secp256k1PublicKeyFromDidKey(did: string): string {
+export function secp256k1PublicKeyFromDidKey(did: string): string {
   const mb = did.slice("did:key:".length).split("#")[0];
   if (mb[0] !== "z") throw new Error("did:key 非 base58btc(z) 編碼");
   const bytes = base58btcDecode(mb.slice(1));

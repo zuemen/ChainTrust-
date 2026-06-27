@@ -16,6 +16,7 @@ import {
 } from "./chain/gateway.js";
 import { issueKYCCredential, revocationKeyOf } from "./issuer.js";
 import { verifyCredential } from "./verifier.js";
+import { issueKycSdJwt, presentKycMinimal, verifyKycSdJwtPresentation } from "./sdjwt.js";
 import { issuerAddressFromIdentifier } from "./credentialHash.js";
 import { MockPublicCaAdapter } from "./adapters/cht.js";
 import { config } from "./config.js";
@@ -103,7 +104,42 @@ async function main() {
   line(`    驗證結果：${JSON.stringify(r3.checks)}（reason: ${r3.reason}）`);
   assert(r3.ok === false && r3.checks.trustedIssuer === false, "未受信任 Issuer 驗證失敗");
 
-  line("\n✅ M1 e2e 全數通過。");
+  // ── M2.0：SD-JWT 選擇性揭露 ──────────────────────────────
+  line(`\n=== M2.0 SD-JWT 選擇性揭露 ===`);
+  const sdVc = await issueKycSdJwt(
+    {
+      issuer,
+      holderDid: holder.did,
+      subject: { kycLevel: 2, over18: true, country: "TW", fullName: "王小明", birthDate: "1990-01-01" },
+    },
+    agent
+  );
+  line(`[5] 簽發 SD-JWT KYCCredential（${sdVc.split("~").length - 2} 個可選擇揭露欄位）`);
+
+  // Holder 只揭露 kycLevel（供「kycLevel>=2」述詞），其餘 PII 不洩
+  const pres = await presentKycMinimal(sdVc, ["kycLevel"]);
+  const sd1 = await verifyKycSdJwtPresentation(chain, pres, { minKycLevel: 2 });
+  line(`    實際揭露欄位：[${sd1.disclosed.join(", ")}]`);
+  line(`    未揭露(隱藏)欄位：[${sd1.withheld.join(", ")}]`);
+  line(`    出示內容 payload keys：[${Object.keys(sd1.payload ?? {}).join(", ")}]`);
+  line(`    驗證結果：${JSON.stringify(sd1.checks)}`);
+  assert(sd1.ok === true, "最小揭露出示驗證通過（含 kycLevel>=2 述詞）");
+  assert(sd1.disclosed.length === 1 && sd1.disclosed[0] === "kycLevel", "只揭露 kycLevel");
+  const payloadKeys = Object.keys(sd1.payload ?? {});
+  for (const hidden of ["fullName", "birthDate", "country", "over18"]) {
+    assert(!payloadKeys.includes(hidden), `未揭露欄位不存在於出示內容：${hidden}`);
+  }
+  assert(sd1.checks.trustedIssuer && sd1.checks.notRevoked, "SD-JWT 仍走 isTrustedIssuer + isRevoked");
+
+  // 撤銷該 SD-JWT VC → 驗證失敗
+  line(`\n[6] 撤銷 SD-JWT VC…`);
+  const sdKey = (sd1.payload as any).credentialStatus.revocationKey;
+  await chain.revoke(sdKey);
+  const sd2 = await verifyKycSdJwtPresentation(chain, pres, { minKycLevel: 2 });
+  line(`    驗證結果：${JSON.stringify(sd2.checks)}（reason: ${sd2.reason}）`);
+  assert(sd2.ok === false && sd2.checks.notRevoked === false, "撤銷後 SD-JWT 出示驗證失敗");
+
+  line("\n✅ M1 + M2.0 e2e 全數通過。");
 }
 
 main().catch((e) => {

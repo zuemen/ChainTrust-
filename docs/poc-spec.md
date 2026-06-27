@@ -35,8 +35,13 @@ interface IRevocationRegistry {
   - `issueKYCCredential({ holderDid, subject })` → 簽發 `KYCCredential`（claims：`kycLevel`、`fullVerified`、`over18`、`credentialStatus`）。
   - `issueMobileRealNameCredential({ holderDid, subject })` → `MobileRealNameCredential`（claims：`msisdnVerified`、`carrier`、`realName`）。
 - `verifier.ts`
-  - `verifyPresentation(vcOrVp)` → `{ ok, checks: { signature, trustedIssuer, notRevoked }, reason?, risk? }`。
-  - 流程：驗章 → `IssuerRegistry.isTrustedIssuer(issuerAddr)` → `RevocationRegistry.isRevoked(hash)` →（M2）AI `/score`。
+  - `verifyCredential(agent, chain, vc)` → `{ ok, checks: { signature, trustedIssuer, notRevoked }, reason?, issuerAddress? }`。
+  - 流程：驗章 → `IssuerRegistry.isTrustedIssuer(issuerAddr)` → `RevocationRegistry.isRevoked(hash)` →（M2.1）AI `/score`。
+- `sdjwt.ts`（M2.0 選擇性揭露）
+  - `issueKycSdJwt({issuer, holderDid, subject})` → SD-JWT VC，PII claim（`kycLevel`/`over18`/`country`/`fullName`/`birthDate`）皆為 salted、可選擇揭露；`credentialStatus` 常駐可見。
+  - `presentKycMinimal(sdJwtVc, revealKeys)` → Holder 只揭露指定欄位（預設僅 `kycLevel`）。
+  - `verifyKycSdJwtPresentation(chain, presentation, {minKycLevel})` → `{ ok, checks:{signature,trustedIssuer,notRevoked,predicate}, disclosed[], withheld[], payload }`；在缺完整 PII 下驗章，仍走 `isTrustedIssuer` + `isRevoked`，並評估 `kycLevel>=門檻` 述詞。
+  - 簽/驗用 issuer 的 Secp256k1（ES256K，did:key 推導公鑰），實作於 `@sd-jwt/sd-jwt-vc`。
 
 ### 2.3 ai-service（M2）
 
