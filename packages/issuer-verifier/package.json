@@ -1,0 +1,38 @@
+{
+  "name": "@chaintrust/issuer-verifier",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "e2e": "tsx src/e2e.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@veramo/core": "^6.0.0",
+    "@veramo/credential-w3c": "^6.0.0",
+    "@veramo/did-manager": "^6.0.0",
+    "@veramo/did-provider-ethr": "^6.0.0",
+    "@veramo/did-provider-key": "^6.0.0",
+    "@veramo/did-resolver": "^6.0.0",
+    "@veramo/key-manager": "^6.0.0",
+    "@veramo/kms-local": "^6.0.0",
+    "did-resolver": "^4.1.0",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.2",
+    "ethr-did-resolver": "^10.1.10",
+    "express": "^4.19.2",
+    "key-did-resolver": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}
