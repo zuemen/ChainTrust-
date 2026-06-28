@@ -21,6 +21,25 @@ def _samples():
         return json.load(f)["samples"]
 
 
+def test_root_info():
+    """GET / 回服務資訊與端點清單（雲端探測/直開不再 404）。"""
+    r = client.get("/")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["service"]
+    assert "POST /score" in body["endpoints"]
+    assert "GET /metrics" in body["endpoints"]
+
+
+def test_favicon_no_content():
+    r = client.get("/favicon.ico")
+    assert r.status_code == 204
+
+
+def test_docs_available():
+    assert client.get("/docs").status_code == 200
+
+
 def test_health():
     r = client.get("/health")
     assert r.status_code == 200
