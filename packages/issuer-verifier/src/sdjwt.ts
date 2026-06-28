@@ -41,17 +41,17 @@ const selfResolvingVerifier = async (data: string, sig: string): Promise<boolean
   const payload = JSON.parse(b64uToString(payloadB64));
   const iss: string | undefined = payload?.iss;
   if (!iss) return false;
-  const pubHex = secp256k1PublicKeyFromDidKey(iss);
-  return verifyES256K(data, sig, pubHex);
+  const expectedAddr = computeAddress("0x" + secp256k1PublicKeyFromDidKey(iss));
+  return verifyES256K(data, sig, expectedAddr);
 };
 
-function verifyES256K(data: string, sigB64u: string, pubKeyHexCompressed: string): boolean {
+/** 驗 ES256K：以還原公鑰推得位址與 expectedAddr 比對（兩 parity 皆試）。 */
+function verifyES256K(data: string, sigB64u: string, expectedAddr: string): boolean {
   const dgst = sha256(toUtf8Bytes(data));
   const raw = b64uToBytes(sigB64u);
   if (raw.length !== 64) return false;
   const r = hexlify(raw.slice(0, 32));
   const s = hexlify(raw.slice(32, 64));
-  const expectedAddr = computeAddress("0x" + pubKeyHexCompressed);
   for (const yParity of [0, 1] as const) {
     try {
       const pub = SigningKey.recoverPublicKey(dgst, { r, s, yParity });
@@ -61,6 +61,36 @@ function verifyES256K(data: string, sigB64u: string, pubKeyHexCompressed: string
     }
   }
   return false;
+}
+
+// ── Key binding（階段 B）工具 ──────────────────────────────
+const KB_TYP = "kb+jwt";
+
+function b64uJson(obj: unknown): string {
+  return Buffer.from(JSON.stringify(obj)).toString("base64url");
+}
+
+/** 由 did:key(Secp256k1) 推 JWK（cnf 用，綁定持有者公鑰） */
+function jwkFromDidKey(did: string): { kty: string; crv: string; x: string; y: string } {
+  const compressed = secp256k1PublicKeyFromDidKey(did);
+  const uncompressed = SigningKey.computePublicKey("0x" + compressed, false); // 0x04|x|y
+  const hex = uncompressed.slice(4); // 去掉 0x04
+  const x = Buffer.from(hex.slice(0, 64), "hex").toString("base64url");
+  const y = Buffer.from(hex.slice(64, 128), "hex").toString("base64url");
+  return { kty: "EC", crv: "secp256k1", x, y };
+}
+
+/** 由 cnf JWK 推 ETH 位址（驗 KB 簽章用） */
+function addrFromJwk(jwk: { x: string; y: string }): string {
+  const x = Buffer.from(jwk.x, "base64url").toString("hex").padStart(64, "0");
+  const y = Buffer.from(jwk.y, "base64url").toString("hex").padStart(64, "0");
+  return computeAddress("0x04" + x + y);
+}
+
+/** sd_hash = base64url(sha256(core))，core 為含末尾 '~' 的 SD-JWT（KB 之前） */
+function sdHash(core: string): string {
+  const d = sha256(toUtf8Bytes(core)); // 0x..
+  return Buffer.from(d.slice(2), "hex").toString("base64url");
 }
 
 // ── SD-JWT 實例 ───────────────────────────────────────────
@@ -122,6 +152,8 @@ export async function issueKycSdJwt(input: IssueKycSdJwtInput, agent: ChainTrust
       type: REVOCATION_STATUS_TYPE,
       revocationKey: credentialHash(id),
     },
+    // 階段 B：cnf 綁定持有者公鑰（key binding 的信任錨）
+    cnf: { jwk: jwkFromDidKey(input.holderDid) },
   };
   const disclosureFrame = { _sd: [...KYC_SD_CLAIMS] };
   return sdjwt.issue(payload, disclosureFrame as any);
@@ -138,11 +170,92 @@ export async function presentKycMinimal(
   return sdjwt.present(sdJwtVc, frame as any);
 }
 
+/**
+ * 階段 B：帶 key binding 的出示。
+ * 在最小揭露 core 後附上 KB-JWT（aud/nonce/iat/sd_hash），用持有者私鑰 ES256K 簽。
+ * 防止出示被攔截後轉手他人（他人無持有者私鑰，無法產生對應 cnf 的 KB）。
+ */
+export async function presentKycWithKeyBinding(
+  agent: ChainTrustAgent,
+  holder: IIdentifier,
+  sdJwtVc: string,
+  revealKeys: KycSdClaim[],
+  kb: { aud: string; nonce: string }
+): Promise<string> {
+  const kid = holder.keys[0]?.kid;
+  if (!kid) throw new Error("Holder identifier 無金鑰 kid，無法簽 KB-JWT");
+  const core = await presentKycMinimal(sdJwtVc, revealKeys); // 末尾含 '~'
+  const header = { alg: "ES256K", typ: KB_TYP };
+  const payload = {
+    iat: Math.floor(Date.now() / 1000),
+    aud: kb.aud,
+    nonce: kb.nonce,
+    sd_hash: sdHash(core),
+  };
+  const signingInput = `${b64uJson(header)}.${b64uJson(payload)}`;
+  const sig = await agent.keyManagerSign({
+    keyRef: kid,
+    algorithm: "ES256K",
+    data: signingInput,
+    encoding: "utf-8",
+  });
+  return core + `${signingInput}.${sig}`;
+}
+
+interface KbVerifyResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/** 驗 KB-JWT：typ、對 cnf 公鑰的簽章、sd_hash、aud、nonce、新鮮度。 */
+function verifyKeyBinding(
+  kbJwt: string | null,
+  core: string,
+  payload: Record<string, any>,
+  opts?: { expectedAud?: string; expectedNonce?: string; maxAgeSec?: number }
+): KbVerifyResult {
+  if (!kbJwt) return { ok: false, reason: "缺 key binding（KB-JWT）" };
+  const parts = kbJwt.split(".");
+  if (parts.length !== 3) return { ok: false, reason: "KB-JWT 格式錯誤" };
+  const [h, p, s] = parts;
+  let header: any, kbPayload: any;
+  try {
+    header = JSON.parse(b64uToString(h));
+    kbPayload = JSON.parse(b64uToString(p));
+  } catch {
+    return { ok: false, reason: "KB-JWT 解析失敗" };
+  }
+  if (header?.typ !== KB_TYP) return { ok: false, reason: "KB typ 非 kb+jwt" };
+
+  const jwk = payload?.cnf?.jwk;
+  if (!jwk) return { ok: false, reason: "SD-JWT 缺 cnf（未綁定持有者）" };
+  const holderAddr = addrFromJwk(jwk);
+  if (!verifyES256K(`${h}.${p}`, s, holderAddr)) {
+    return { ok: false, reason: "KB 簽章與持有者公鑰不符（疑似被轉手）" };
+  }
+  if (kbPayload?.sd_hash !== sdHash(core)) {
+    return { ok: false, reason: "sd_hash 不符（出示內容遭竄改）" };
+  }
+  if (opts?.expectedAud != null && kbPayload?.aud !== opts.expectedAud) {
+    return { ok: false, reason: "aud 不符（出示對象錯誤）" };
+  }
+  if (opts?.expectedNonce != null && kbPayload?.nonce !== opts.expectedNonce) {
+    return { ok: false, reason: "nonce 不符（可能為重放）" };
+  }
+  const maxAge = opts?.maxAgeSec ?? 300;
+  if (typeof kbPayload?.iat === "number" && Date.now() / 1000 - kbPayload.iat > maxAge) {
+    return { ok: false, reason: "KB-JWT 已過期" };
+  }
+  return { ok: true };
+}
+
 export interface SdJwtVerifyChecks {
   signature: boolean;
   trustedIssuer: boolean;
   notRevoked: boolean;
   predicate: boolean;
+  /** 階段 B：持有者 key binding（僅在出示含 KB 或要求 KB 時出現） */
+  keyBinding?: boolean;
 }
 export interface SdJwtVerifyResult {
   ok: boolean;
@@ -166,7 +279,12 @@ export interface SdJwtVerifyResult {
 export async function verifyKycSdJwtPresentation(
   chain: ChainGateway,
   presentation: string,
-  opts?: { minKycLevel?: number }
+  opts?: {
+    minKycLevel?: number;
+    requireKeyBinding?: boolean;
+    expectedAud?: string;
+    expectedNonce?: string;
+  }
 ): Promise<SdJwtVerifyResult> {
   const checks: SdJwtVerifyChecks = {
     signature: false,
@@ -176,9 +294,19 @@ export async function verifyKycSdJwtPresentation(
   };
   const sdjwt = holderVerifierInstance();
 
+  // 分離 KB-JWT（最後一段若含 "." 即為 KB-JWT；disclosure 為單段 base64url 無 "."）
+  let core = presentation;
+  let kbJwt: string | null = null;
+  const lastTilde = presentation.lastIndexOf("~");
+  const tail = lastTilde >= 0 ? presentation.slice(lastTilde + 1) : "";
+  if (tail.includes(".")) {
+    kbJwt = tail;
+    core = presentation.slice(0, lastTilde + 1);
+  }
+
   let payload: Record<string, any>;
   try {
-    const verified = await sdjwt.verify(presentation);
+    const verified = await sdjwt.verify(core);
     payload = (verified.payload ?? {}) as Record<string, any>;
     checks.signature = true;
   } catch (e: any) {
@@ -237,6 +365,26 @@ export async function verifyKycSdJwtPresentation(
       payload,
       reason: `述詞未滿足：需 kycLevel>=${minLevel}（揭露值：${payload.kycLevel ?? "未揭露"}）`,
     };
+  }
+
+  // 5) 階段 B：key binding（出示含 KB 或要求 KB 時驗證）
+  if (opts?.requireKeyBinding || kbJwt) {
+    const kbRes = verifyKeyBinding(kbJwt, core, payload, {
+      expectedAud: opts?.expectedAud,
+      expectedNonce: opts?.expectedNonce,
+    });
+    checks.keyBinding = kbRes.ok;
+    if (!kbRes.ok) {
+      return {
+        ok: false,
+        checks,
+        issuerAddress,
+        disclosed,
+        withheld,
+        payload,
+        reason: `key binding 失敗：${kbRes.reason}`,
+      };
+    }
   }
 
   return { ok: true, checks, issuerAddress, disclosed, withheld, payload };

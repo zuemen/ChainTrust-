@@ -8,7 +8,8 @@ import {
 } from "./chain/gateway.js";
 import { issueKYCCredential, issueMobileRealNameCredential, revocationKeyOf } from "./issuer.js";
 import { verifyCredential, verifyAndScore } from "./verifier.js";
-import { issueKycSdJwt, verifyKycSdJwtPresentation } from "./sdjwt.js";
+import { issueKycSdJwt, presentKycWithKeyBinding, verifyKycSdJwtPresentation } from "./sdjwt.js";
+import { randomUUID } from "crypto";
 import { scoreTransaction } from "./fraud.js";
 import { issuerAddressFromIdentifier } from "./credentialHash.js";
 import { config } from "./config.js";
@@ -70,12 +71,53 @@ async function main() {
     }
   });
 
-  // 驗證 SD-JWT 出示 + AI 風險評分 → 綜合 outcome
+  // 階段 B：驗證方核發一次性 nonce（防重放）。aud = 本驗證方識別。
+  const VERIFIER_AUD = process.env.VERIFIER_AUD ?? "chaintrust-verifier";
+  const issuedNonces = new Set<string>();
+  app.post("/sdjwt/nonce", (_req, res) => {
+    const nonce = randomUUID();
+    issuedNonces.add(nonce);
+    res.json({ nonce, aud: VERIFIER_AUD });
+  });
+
+  // 階段 B：持有者端出示（PoC：holder 金鑰在 server agent），帶 key binding
+  app.post("/sdjwt/present", async (req, res) => {
+    try {
+      const { vc, holderDid, revealKeys, aud, nonce } = req.body ?? {};
+      if (!vc || !holderDid) return res.status(400).json({ error: "缺 vc 或 holderDid" });
+      const holder = await agent.didManagerGet({ did: holderDid });
+      const presentation = await presentKycWithKeyBinding(
+        agent,
+        holder,
+        vc,
+        revealKeys ?? ["kycLevel"],
+        { aud: aud ?? VERIFIER_AUD, nonce: nonce ?? "" }
+      );
+      res.json({ presentation });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message ?? String(e) });
+    }
+  });
+
+  // 驗證 SD-JWT 出示（含 key binding）+ AI 風險評分 → 綜合 outcome
   app.post("/sdjwt/verify", async (req, res) => {
     try {
-      const { presentation, tx } = req.body ?? {};
+      const { presentation, tx, requireKeyBinding, expectedNonce } = req.body ?? {};
       if (!presentation) return res.status(400).json({ error: "缺 presentation" });
-      const verify = await verifyKycSdJwtPresentation(chain, presentation, { minKycLevel: 2 });
+      // 若帶 expectedNonce，驗其為本方核發且未用過（一次性）
+      if (expectedNonce != null && !issuedNonces.has(expectedNonce)) {
+        return res.json({
+          verify: { ok: false, checks: {}, disclosed: [], withheld: [], reason: "nonce 無效或已使用" },
+          outcome: "reject",
+        });
+      }
+      const verify = await verifyKycSdJwtPresentation(chain, presentation, {
+        minKycLevel: 2,
+        requireKeyBinding: requireKeyBinding === true,
+        expectedAud: requireKeyBinding === true ? VERIFIER_AUD : undefined,
+        expectedNonce: expectedNonce ?? undefined,
+      });
+      if (verify.ok && expectedNonce != null) issuedNonces.delete(expectedNonce); // 消耗 nonce
       let risk;
       let outcome: "approve" | "review" | "reject" = "reject";
       if (verify.ok) {

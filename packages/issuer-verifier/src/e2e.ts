@@ -16,7 +16,7 @@ import {
 } from "./chain/gateway.js";
 import { issueKYCCredential, revocationKeyOf } from "./issuer.js";
 import { verifyCredential } from "./verifier.js";
-import { issueKycSdJwt, presentKycMinimal, verifyKycSdJwtPresentation } from "./sdjwt.js";
+import { issueKycSdJwt, presentKycMinimal, presentKycWithKeyBinding, verifyKycSdJwtPresentation } from "./sdjwt.js";
 import { issuerAddressFromIdentifier } from "./credentialHash.js";
 import { MockPublicCaAdapter } from "./adapters/cht.js";
 import { config } from "./config.js";
@@ -139,7 +139,29 @@ async function main() {
   line(`    驗證結果：${JSON.stringify(sd2.checks)}（reason: ${sd2.reason}）`);
   assert(sd2.ok === false && sd2.checks.notRevoked === false, "撤銷後 SD-JWT 出示驗證失敗");
 
-  line("\n✅ M1 + M2.0 e2e 全數通過。");
+  // ── 階段 B：SD-JWT key binding ──────────────────────────
+  line(`\n=== 階段B SD-JWT key binding ===`);
+  const kbVc = await issueKycSdJwt({ issuer, holderDid: holder.did, subject: { kycLevel: 2 } }, agent);
+  const AUD = "chaintrust-verifier";
+  const NONCE = "demo-nonce-001";
+  line(`[7] 持有者以私鑰簽 KB-JWT 出示（aud=${AUD}）`);
+  const kbPres = await presentKycWithKeyBinding(agent, holder, kbVc, ["kycLevel"], { aud: AUD, nonce: NONCE });
+  const kb1 = await verifyKycSdJwtPresentation(chain, kbPres, {
+    requireKeyBinding: true, expectedAud: AUD, expectedNonce: NONCE,
+  });
+  line(`    驗證結果：${JSON.stringify(kb1.checks)}`);
+  assert(kb1.ok === true && kb1.checks.keyBinding === true, "持有者 KB 出示驗證通過");
+
+  line(`[8] 攻擊者攔截後以自己私鑰簽 KB（無持有者私鑰）`);
+  const attacker = await createHolderDid(agent, "attacker");
+  const evilPres = await presentKycWithKeyBinding(agent, attacker, kbVc, ["kycLevel"], { aud: AUD, nonce: NONCE });
+  const kb2 = await verifyKycSdJwtPresentation(chain, evilPres, {
+    requireKeyBinding: true, expectedAud: AUD, expectedNonce: NONCE,
+  });
+  line(`    驗證結果：${JSON.stringify(kb2.checks)}（reason: ${kb2.reason}）`);
+  assert(kb2.ok === false && kb2.checks.keyBinding === false, "轉手出示（他人私鑰）被擋下");
+
+  line("\n✅ M1 + M2.0 + 階段B e2e 全數通過。");
 }
 
 main().catch((e) => {
