@@ -1,0 +1,72 @@
+{
+  "source": "synthetic (PaySim-like)",
+  "rows": 40000,
+  "fraud": 3289,
+  "primary_metric": "PR-AUC",
+  "holdout_pr_auc": 0.8564,
+  "holdout_roc_auc": 0.9179,
+  "holdout_auc": 0.9179,
+  "recall_at_fpr_1pct": 0.8399,
+  "precision_at_100": 0.99,
+  "mcc": 0.9052,
+  "threshold": 0.05,
+  "recall_at_threshold": 0.8399,
+  "confusion_at_threshold": {
+    "tp": 404,
+    "fp": 4,
+    "fn": 77,
+    "tn": 5515
+  },
+  "calibration": "isotonic",
+  "split": "out-of-time (by step)",
+  "top_feature_importances": [
+    {
+      "feature": "account_age_days",
+      "importance": 237
+    },
+    {
+      "feature": "errorBalanceDest",
+      "importance": 194
+    },
+    {
+      "feature": "newbalanceDest",
+      "importance": 188
+    },
+    {
+      "feature": "errorBalanceOrig",
+      "importance": 179
+    },
+    {
+      "feature": "vc_age_days",
+      "importance": 162
+    },
+    {
+      "feature": "oldbalanceDest",
+      "importance": 156
+    },
+    {
+      "feature": "drain_ratio",
+      "importance": 146
+    },
+    {
+      "feature": "payee_risk",
+      "importance": 144
+    },
+    {
+      "feature": "oldbalanceOrg",
+      "importance": 135
+    },
+    {
+      "feature": "newbalanceOrig",
+      "importance": 123
+    },
+    {
+      "feature": "amount",
+      "importance": 101
+    },
+    {
+      "feature": "tx_count_24h",
+      "importance": 71
+    }
+  ]
+}

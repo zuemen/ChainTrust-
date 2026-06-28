@@ -21,6 +21,11 @@ def generate(n: int = 40_000, fraud_ratio: float = 0.07, seed: int = 42) -> pd.D
     n_legit = n - n_fraud
     rows = []
 
+    # 水房聚合戶池（A2 圖譜）：詐欺資金匯入此小集合後集中提領 → 高 fan_in + CASH_OUT
+    COLL = [f"MULE_COLL_{i}" for i in range(12)]
+    def cust() -> str: return f"C{int(rng.integers(0, 900_000))}"
+    def merch() -> str: return f"M{int(rng.integers(0, 90_000))}"
+
     # ── 正常交易（含偶發大額合法轉帳，與詐欺部分重疊）──
     for _ in range(n_legit):
         t = rng.choice(TYPES, p=[0.20, 0.22, 0.05, 0.43, 0.10])
@@ -31,9 +36,14 @@ def generate(n: int = 40_000, fraud_ratio: float = 0.07, seed: int = 42) -> pd.D
         new_org = max(0.0, old_org - amount * drain)
         old_dest = float(abs(rng.lognormal(8.0, 1.2)))
         new_dest = old_dest + amount + rng.normal(0, amount * 0.03)
+        # 正常交易：對手分散（低 fan_in）
+        n_orig = cust()
+        n_dest = merch() if t == "PAYMENT" else cust()
         rows.append({
             "step": int(rng.integers(0, 720)),
             "type": t,
+            "nameOrig": n_orig,
+            "nameDest": n_dest,
             "amount": amount,
             "oldbalanceOrg": old_org,
             "newbalanceOrig": new_org,
@@ -59,9 +69,18 @@ def generate(n: int = 40_000, fraud_ratio: float = 0.07, seed: int = 42) -> pd.D
         new_org = max(0.0, old_org - amount) * float(rng.uniform(0.0, 0.10))
         old_dest = float(abs(rng.lognormal(7.2, 1.4)))
         new_dest = old_dest + amount * float(rng.uniform(0.0, 0.6))  # 帳務常不一致
+        # 人頭環：TRANSFER 匯入水房（高 fan_in）；CASH_OUT 由水房提領（聚合戶）
+        if t == "TRANSFER":
+            n_orig, n_dest = cust(), COLL[int(rng.integers(0, len(COLL)))]
+        elif t == "CASH_OUT":
+            n_orig, n_dest = COLL[int(rng.integers(0, len(COLL)))], merch()
+        else:
+            n_orig, n_dest = cust(), cust()
         rows.append({
             "step": int(rng.integers(0, 720)),
             "type": t,
+            "nameOrig": n_orig,
+            "nameDest": n_dest,
             "amount": amount,
             "oldbalanceOrg": old_org,
             "newbalanceOrig": new_org,

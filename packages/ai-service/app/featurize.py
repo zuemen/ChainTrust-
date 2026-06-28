@@ -1,11 +1,16 @@
 """特徵工程 — 訓練與服務必須共用同一套，確保一致。"""
 from __future__ import annotations
 
+import math
 from typing import Any, Mapping
 
 TX_TYPES = ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
 
+# 結構化/拆分常見通報門檻（新制人頭帳戶每日 ≤ 1 萬；AML 申報門檻 50 萬等）
+STRUCTURING_THRESHOLDS = [10_000, 30_000, 50_000, 500_000]
+
 # 固定特徵順序（model.joblib 會一併存 feature_list 以防漂移）
+# 註：AML/反詐樣態特徵（A1）與圖譜特徵（A2）附加在尾端，利於與舊模型相容。
 FEATURE_ORDER: list[str] = [
     "amount",
     "oldbalanceOrg",
@@ -24,6 +29,16 @@ FEATURE_ORDER: list[str] = [
     "mobile_realname_verified",
     "geo_jump",
     *[f"type_{t}" for t in TX_TYPES],
+    # ── A1：AML/反詐樣態特徵 ──
+    "amount_log",
+    "drain_ratio",
+    "pass_through",
+    "near_threshold",
+    "round_amount",
+    "velocity_ratio",
+    # ── A2：圖譜人頭環特徵（由 graph.py 提供，缺則 0）──
+    "payee_fan_in",
+    "account_graph_risk",
 ]
 
 
@@ -51,6 +66,20 @@ def featurize(row: Mapping[str, Any]) -> dict[str, float]:
     error_dest = old_dest + amount - new_dest
 
     tx_type = str(row.get("type", "PAYMENT")).upper()
+    tx_1h = _num(row.get("tx_count_1h"))
+    tx_24h = _num(row.get("tx_count_24h"))
+
+    # ── A1：AML/反詐樣態特徵 ──
+    drain_ratio = (old_org - new_org) / max(old_org, 1.0)
+    pass_through = 1.0 if (tx_type in ("TRANSFER", "CASH_OUT") and drain_ratio >= 0.9) else 0.0
+    # 結構化拆分：金額落在通報門檻下方 5% 帶
+    near_threshold = 0.0
+    for thr in STRUCTURING_THRESHOLDS:
+        if thr * 0.95 <= amount < thr:
+            near_threshold = 1.0
+            break
+    round_amount = 1.0 if (amount > 0 and amount % 1000 == 0) else 0.0
+    velocity_ratio = tx_1h / max(tx_24h, 1.0)
 
     feats: dict[str, float] = {
         "amount": amount,
@@ -60,8 +89,8 @@ def featurize(row: Mapping[str, Any]) -> dict[str, float]:
         "newbalanceDest": new_dest,
         "errorBalanceOrig": error_org,
         "errorBalanceDest": error_dest,
-        "tx_count_1h": _num(row.get("tx_count_1h")),
-        "tx_count_24h": _num(row.get("tx_count_24h")),
+        "tx_count_1h": tx_1h,
+        "tx_count_24h": tx_24h,
         "vc_age_days": _num(row.get("vc_age_days"), 365.0),
         "account_age_days": _num(row.get("account_age_days"), 365.0),
         "cross_institution_presentations": _num(row.get("cross_institution_presentations")),
@@ -69,6 +98,16 @@ def featurize(row: Mapping[str, Any]) -> dict[str, float]:
         "device_changed": _num(row.get("device_changed")),
         "mobile_realname_verified": _num(row.get("mobile_realname_verified"), 1.0),
         "geo_jump": _num(row.get("geo_jump")),
+        # A1
+        "amount_log": math.log1p(amount),
+        "drain_ratio": drain_ratio,
+        "pass_through": pass_through,
+        "near_threshold": near_threshold,
+        "round_amount": round_amount,
+        "velocity_ratio": velocity_ratio,
+        # A2（圖譜：由 graph.py 注入；/score 時可由呼叫端帶入，缺則 0）
+        "payee_fan_in": _num(row.get("payee_fan_in")),
+        "account_graph_risk": _num(row.get("account_graph_risk")),
     }
     for t in TX_TYPES:
         feats[f"type_{t}"] = 1.0 if tx_type == t else 0.0
@@ -104,6 +143,16 @@ FEATURE_LABELS: dict[str, str] = {
     "type_DEBIT": "交易類型：扣款",
     "type_PAYMENT": "交易類型：支付",
     "type_TRANSFER": "交易類型：轉帳",
+    # A1：AML/反詐樣態
+    "amount_log": "金額（對數）",
+    "drain_ratio": "帳戶清空比例",
+    "pass_through": "過水（進來即清空）",
+    "near_threshold": "金額貼近通報門檻（疑似拆分）",
+    "round_amount": "整數金額",
+    "velocity_ratio": "短時交易爆量比",
+    # A2：圖譜
+    "payee_fan_in": "收款方匯入來源數（fan-in）",
+    "account_graph_risk": "帳戶圖譜風險（人頭環/聚合戶）",
 }
 
 

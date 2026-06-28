@@ -42,8 +42,8 @@
       }
     },
     {
-      "label": "review_verified_but_drain",
-      "expect": "review",
+      "label": "pass_through_verified_drain",
+      "expect": "block",
       "ctx": {
         "type": "CASH_OUT", "amount": 350000, "oldbalanceOrg": 400000, "newbalanceOrig": 20000,
         "oldbalanceDest": 2000, "newbalanceDest": 2000, "tx_count_1h": 2, "tx_count_24h": 12,
@@ -53,7 +53,7 @@
     },
     {
       "label": "account_takeover_drain",
-      "expect": "review",
+      "expect": "block",
       "ctx": {
         "type": "TRANSFER", "amount": 680000, "oldbalanceOrg": 700000, "newbalanceOrig": 0,
         "oldbalanceDest": 3000, "newbalanceDest": 3000, "tx_count_1h": 7, "tx_count_24h": 28,
@@ -73,12 +73,34 @@
     },
     {
       "label": "structuring_smurf",
-      "expect": "review",
+      "expect": "pass",
       "ctx": {
         "type": "TRANSFER", "amount": 49000, "oldbalanceOrg": 300000, "newbalanceOrig": 251000,
         "oldbalanceDest": 10000, "newbalanceDest": 59000, "tx_count_1h": 9, "tx_count_24h": 38,
         "device_changed": false, "mobile_realname_verified": true, "vc_age_days": 200,
         "account_age_days": 300, "cross_institution_presentations": 6, "payee_risk": 0.45, "geo_jump": false
+      }
+    },
+    {
+      "label": "pass_through_mule",
+      "expect": "block",
+      "ctx": {
+        "type": "TRANSFER", "amount": 300000, "oldbalanceOrg": 310000, "newbalanceOrig": 0,
+        "oldbalanceDest": 1000, "newbalanceDest": 1000, "tx_count_1h": 6, "tx_count_24h": 30,
+        "device_changed": true, "mobile_realname_verified": false, "vc_age_days": 4,
+        "account_age_days": 3, "cross_institution_presentations": 11, "payee_risk": 0.85, "geo_jump": true,
+        "payee_fan_in": 9, "account_graph_risk": 0.7
+      }
+    },
+    {
+      "label": "fan_in_collection",
+      "expect": "block",
+      "ctx": {
+        "type": "CASH_OUT", "amount": 200000, "oldbalanceOrg": 205000, "newbalanceOrig": 1000,
+        "oldbalanceDest": 2000, "newbalanceDest": 2000, "tx_count_1h": 5, "tx_count_24h": 26,
+        "device_changed": true, "mobile_realname_verified": false, "vc_age_days": 6,
+        "account_age_days": 5, "cross_institution_presentations": 9, "payee_risk": 0.7, "geo_jump": false,
+        "payee_fan_in": 2, "account_graph_risk": 0.85
       }
     }
   ]

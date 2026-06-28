@@ -73,3 +73,58 @@ def test_top_factors_present_and_shaped():
     first = tf[0]
     assert set(first.keys()) >= {"feature", "label", "impact"}
     assert isinstance(first["label"], str) and first["label"]
+
+
+# ── A1：AML/反詐樣態特徵 ──
+def test_pattern_features():
+    from app.featurize import featurize
+    # 過水：大額 TRANSFER 清空 → pass_through=1、drain_ratio≈1
+    f = featurize({"type": "TRANSFER", "amount": 300000, "oldbalanceOrg": 310000, "newbalanceOrig": 0})
+    assert f["pass_through"] == 1.0
+    assert f["drain_ratio"] >= 0.9
+    # 結構化：49000 落在 50000 下方 5% 帶
+    assert featurize({"type": "TRANSFER", "amount": 49000})["near_threshold"] == 1.0
+    assert featurize({"type": "TRANSFER", "amount": 12000})["near_threshold"] == 0.0
+    # 整數金額 / velocity_ratio
+    assert featurize({"amount": 5000})["round_amount"] == 1.0
+    assert featurize({"amount": 5123})["round_amount"] == 0.0
+    assert featurize({"tx_count_1h": 6, "tx_count_24h": 12})["velocity_ratio"] == 0.5
+
+
+# ── A3：對齊 AML 樣態的 reason codes ──
+def test_pattern_reason_codes():
+    from app.rules import reason_codes
+    pt = next(s for s in _samples() if s["label"] == "pass_through_mule")["ctx"]
+    codes = reason_codes(pt)
+    assert "PASS_THROUGH" in codes
+    assert "FAN_IN_COLLECTION" in codes and "MULE_RING" in codes  # account_graph_risk=0.7
+    st = next(s for s in _samples() if s["label"] == "structuring_smurf")["ctx"]
+    assert "STRUCTURING" in reason_codes(st)
+
+
+# ── A2：圖譜人頭環偵測 ──
+def test_account_graph():
+    import pandas as pd
+    from app.graph import compute_account_graph, add_graph_features
+
+    # 6 來源匯入水房 COLL 後 COLL 提領 → 聚合戶
+    rows = [{"type": "TRANSFER", "nameOrig": f"C{i}", "nameDest": "COLL"} for i in range(6)]
+    rows.append({"type": "CASH_OUT", "nameOrig": "COLL", "nameDest": "M1"})
+    df = pd.DataFrame(rows)
+    g = compute_account_graph(df)
+    assert g.fan_in["COLL"] == 6
+    assert g.is_collection["COLL"] == 1
+    assert g.risk_of("COLL") >= 0.6
+
+    out = add_graph_features(df)
+    assert "payee_fan_in" in out.columns and "account_graph_risk" in out.columns
+    # 匯入 COLL 的那幾筆，payee_fan_in 應為 6
+    assert out[out["nameDest"] == "COLL"]["payee_fan_in"].max() == 6
+
+
+def test_graph_features_absent_when_no_accounts():
+    import pandas as pd
+    from app.graph import add_graph_features
+    out = add_graph_features(pd.DataFrame([{"type": "PAYMENT", "amount": 100}]))
+    assert out["payee_fan_in"].iloc[0] == 0.0
+    assert out["account_graph_risk"].iloc[0] == 0.0

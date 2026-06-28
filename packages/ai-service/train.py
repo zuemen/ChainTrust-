@@ -17,14 +17,23 @@ except Exception:
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.frozen import FrozenEstimator
 from sklearn.ensemble import IsolationForest
-from sklearn.metrics import average_precision_score, recall_score, roc_auc_score
+from sklearn.metrics import (
+    average_precision_score,
+    matthews_corrcoef,
+    recall_score,
+    roc_auc_score,
+    roc_curve,
+)
 import lightgbm as lgb
 
 HERE = os.path.dirname(__file__)
 sys.path.insert(0, HERE)
 
 from app.featurize import FEATURE_ORDER, featurize  # noqa: E402
+from app.graph import add_graph_features  # noqa: E402
 
 DATA_CSV = os.path.join(HERE, "data", "paysim.csv")
 MODEL_OUT = os.path.join(HERE, "model.joblib")
@@ -51,9 +60,11 @@ def to_matrix(df: pd.DataFrame) -> np.ndarray:
 
 def main() -> None:
     df, source = load_data()
+    # A2：併入帳戶圖譜特徵（payee_fan_in / account_graph_risk）
+    df = add_graph_features(df)
     print(f"[train] 資料來源：{source}  rows={len(df)}  fraud={int(df['isFraud'].sum())}")
 
-    # 依時間切分，避免洩漏
+    # 依時間切分（out-of-time），避免洩漏
     df = df.sort_values("step").reset_index(drop=True)
     n = len(df)
     tr_end, va_end = int(n * 0.7), int(n * 0.85)
@@ -75,8 +86,16 @@ def main() -> None:
         callbacks=[lgb.early_stopping(50, verbose=False), lgb.log_evaluation(0)],
     )
 
-    # 用驗證集挑最大化 F1 的門檻，避免 scale_pos_weight 造成的機率校準偏移
-    proba_va = clf.predict_proba(Xva)[:, 1]
+    # 機率校準（isotonic）：用驗證集校準已訓練的 LGBM，使風險分數有意義
+    # sklearn>=1.6：以 FrozenEstimator 包裝已訓練模型（取代舊 cv="prefit"）
+    calibrated = CalibratedClassifierCV(FrozenEstimator(clf), method="isotonic")
+    calibrated.fit(Xva, yva)
+
+    def proba_of(X: np.ndarray) -> np.ndarray:
+        return calibrated.predict_proba(X)[:, 1]
+
+    # 用驗證集挑最大化 F1 的門檻（基於校準後機率）
+    proba_va = proba_of(Xva)
     grid = np.linspace(0.05, 0.95, 91)
     f1s = []
     for thr in grid:
@@ -89,14 +108,29 @@ def main() -> None:
         f1s.append(2 * prec * rec / (prec + rec) if prec + rec else 0.0)
     best_thr = float(grid[int(np.argmax(f1s))])
 
-    proba = clf.predict_proba(Xte)[:, 1]
-    auc = roc_auc_score(yte, proba)
+    # ── 評估（主指標 PR-AUC；極不平衡下勿看 accuracy）──
+    proba = proba_of(Xte)
     pr_auc = average_precision_score(yte, proba)
+    roc = roc_auc_score(yte, proba)
     recall = recall_score(yte, (proba >= best_thr).astype(int))
-    print(f"[train] holdout AUC      = {auc:.4f}")
-    print(f"[train] holdout PR-AUC   = {pr_auc:.4f}")
-    print(f"[train] 最佳門檻(val F1) = {best_thr:.2f}")
-    print(f"[train] holdout 人頭召回 = {recall:.4f} @thr={best_thr:.2f}")
+    mcc = matthews_corrcoef(yte, (proba >= best_thr).astype(int))
+    # recall @ FPR=1%
+    fpr, tpr, _ = roc_curve(yte, proba)
+    idx = np.where(fpr <= 0.01)[0]
+    recall_at_fpr1 = float(tpr[idx[-1]]) if len(idx) else 0.0
+    # precision @ top-100
+    k = min(100, len(proba))
+    topk = np.argsort(proba)[::-1][:k]
+    precision_at_100 = float(yte[topk].mean()) if k else 0.0
+
+    print(f"[train] holdout PR-AUC（主指標）= {pr_auc:.4f}")
+    print(f"[train] holdout ROC-AUC        = {roc:.4f}")
+    print(f"[train] recall@FPR=1%          = {recall_at_fpr1:.4f}")
+    print(f"[train] precision@100          = {precision_at_100:.4f}")
+    print(f"[train] MCC@thr={best_thr:.2f}        = {mcc:.4f}")
+    print(f"[train] 人頭召回@thr={best_thr:.2f}    = {recall:.4f}")
+    if roc >= 0.999:
+        print("[train] ⚠ ROC-AUC≈1.0：極可能資料洩漏或過擬，請以 PR-AUC 與 out-of-time 為準")
 
     # IsolationForest 用正常樣本訓練
     iso = IsolationForest(n_estimators=200, contamination=0.06, random_state=42)
@@ -106,10 +140,10 @@ def main() -> None:
 
     joblib.dump(
         {
-            "lgbm": clf, "iso": iso,
+            "lgbm": clf, "calibrator": calibrated, "iso": iso,
             "feature_list": FEATURE_ORDER,
             "anomaly_min": amin, "anomaly_max": amax,
-            "source": source, "holdout_auc": float(auc),
+            "source": source, "holdout_pr_auc": float(pr_auc), "holdout_auc": float(roc),
         },
         MODEL_OUT,
     )
@@ -133,19 +167,26 @@ def main() -> None:
         "source": source,
         "rows": int(len(df)),
         "fraud": int(df["isFraud"].sum()),
-        "holdout_auc": round(float(auc), 4),
+        "primary_metric": "PR-AUC",
         "holdout_pr_auc": round(float(pr_auc), 4),
+        "holdout_roc_auc": round(float(roc), 4),
+        "holdout_auc": round(float(roc), 4),  # 向後相容
+        "recall_at_fpr_1pct": round(float(recall_at_fpr1), 4),
+        "precision_at_100": round(float(precision_at_100), 4),
+        "mcc": round(float(mcc), 4),
         "threshold": round(float(best_thr), 2),
         "recall_at_threshold": round(float(recall), 4),
         "confusion_at_threshold": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
+        "calibration": "isotonic",
+        "split": "out-of-time (by step)",
         "top_feature_importances": importances,
     }
     with open(os.path.join(HERE, "metrics.json"), "w", encoding="utf-8") as mf:
         json.dump(metrics, mf, ensure_ascii=False, indent=2)
     print("[train] 已存 metrics.json")
 
-    if auc < 0.90:
-        print(f"[train] ⚠ AUC<0.90（{auc:.4f}），資料訊號可能不足")
+    if pr_auc < 0.70:
+        print(f"[train] ⚠ PR-AUC<0.70（{pr_auc:.4f}），資料訊號可能不足")
 
 
 if __name__ == "__main__":

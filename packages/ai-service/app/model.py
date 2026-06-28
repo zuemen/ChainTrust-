@@ -92,8 +92,9 @@ def score(row: Mapping[str, Any]) -> ScoreResponse:
     feature_order = bundle.get("feature_list", FEATURE_ORDER)
     x = [vectorize(row, feature_order)]
 
-    lgbm = bundle["lgbm"]
-    p_fraud = float(lgbm.predict_proba(x)[0][1])
+    # p_fraud 優先用校準後機率（isotonic），使風險分數有意義；缺則用原始 LGBM
+    estimator = bundle.get("calibrator") or bundle["lgbm"]
+    p_fraud = float(estimator.predict_proba(x)[0][1])
 
     iso = bundle.get("iso")
     anomaly_norm = 0.0
