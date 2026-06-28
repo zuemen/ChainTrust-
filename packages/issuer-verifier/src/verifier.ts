@@ -25,6 +25,45 @@ export interface VerifyAndScoreResult extends VerifyResult {
   outcome: "approve" | "review" | "reject";
 }
 
+export interface TrustRevokeResult {
+  trustedIssuer: boolean;
+  notRevoked: boolean;
+  issuerAddress?: string;
+  reason?: string;
+}
+
+/**
+ * 共用：驗章後的「信任根 + 撤銷」鏈上檢查（verifier.ts 與 sdjwt.ts 共用，避免重複）。
+ *  - 由 issuer DID 推導 ETH 位址 → IssuerRegistry.isTrustedIssuer
+ *  - revocationKey → RevocationRegistry.isRevoked
+ */
+export async function checkTrustAndRevocation(
+  chain: ChainGateway,
+  issuerDid: string,
+  revocationKey: string | undefined
+): Promise<TrustRevokeResult> {
+  let issuerAddress: string;
+  try {
+    issuerAddress = issuerAddressFromDid(issuerDid);
+  } catch (e: any) {
+    return { trustedIssuer: false, notRevoked: false, reason: `信任查詢失敗：${e?.message ?? e}` };
+  }
+  const trustedIssuer = await chain.isTrustedIssuer(issuerAddress);
+  if (!trustedIssuer) {
+    return { trustedIssuer: false, notRevoked: false, issuerAddress, reason: `Issuer 未被信任根背書：${issuerAddress}` };
+  }
+  if (!revocationKey) {
+    return { trustedIssuer: true, notRevoked: false, issuerAddress, reason: "出示缺 credentialStatus" };
+  }
+  const revoked = await chain.isRevoked(revocationKey);
+  return {
+    trustedIssuer: true,
+    notRevoked: !revoked,
+    issuerAddress,
+    reason: revoked ? "VC 已被撤銷" : undefined,
+  };
+}
+
 /**
  * 驗證一張 VC：
  *  1) 驗章（Veramo verifyCredential）
@@ -60,36 +99,15 @@ export async function verifyCredential(
     return { ok: false, checks, reason: `簽章驗證例外：${e?.message ?? e}` };
   }
 
-  // 2) 信任 issuer（由 DID 推導 ETH 位址）
-  let issuerAddress: string;
-  try {
-    issuerAddress = issuerAddressFromDid(issuerDid);
-    checks.trustedIssuer = await chain.isTrustedIssuer(issuerAddress);
-    if (!checks.trustedIssuer) {
-      return {
-        ok: false,
-        checks,
-        issuerAddress,
-        reason: `Issuer 未被信任根背書：${issuerAddress}`,
-      };
-    }
-  } catch (e: any) {
-    return { ok: false, checks, reason: `信任查詢失敗：${e?.message ?? e}` };
+  // 2)+3) 信任根 + 撤銷（共用 helper）
+  const tr = await checkTrustAndRevocation(chain, issuerDid, revocationKeyOf(vc));
+  checks.trustedIssuer = tr.trustedIssuer;
+  checks.notRevoked = tr.notRevoked;
+  if (!tr.trustedIssuer || !tr.notRevoked) {
+    return { ok: false, checks, issuerAddress: tr.issuerAddress, reason: tr.reason };
   }
 
-  // 3) 未撤銷
-  try {
-    const key = revocationKeyOf(vc);
-    const revoked = await chain.isRevoked(key);
-    checks.notRevoked = !revoked;
-    if (revoked) {
-      return { ok: false, checks, issuerAddress, reason: "VC 已被撤銷" };
-    }
-  } catch (e: any) {
-    return { ok: false, checks, issuerAddress, reason: `撤銷查詢失敗：${e?.message ?? e}` };
-  }
-
-  return { ok: true, checks, issuerAddress };
+  return { ok: true, checks, issuerAddress: tr.issuerAddress };
 }
 
 /**

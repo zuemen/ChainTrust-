@@ -48,6 +48,13 @@ docker compose up --build          # → http://localhost:5173
 | AI 風險顯示「反詐服務暫時無法連線」 | ai-service 沒起或沒訓練：`pnpm ai:setup && pnpm ai:train`。 |
 | 想重來 | 結果頁「完成·回錢包」；或刪除憑證重新申請。 |
 
+## 資料與模型誠實聲明（簡報用）
+
+- **模型需先訓練**：`model.joblib` 與 `metrics.json` 不入庫，首次請跑 `pnpm ai:train` 產生；未訓練時 `/score` 會自動退回**可解釋規則 baseline**（demo 仍可跑）。
+- **半合成資料**：無 Kaggle 時用合成 PaySim-like 資料。即使改用**真 PaySim**，其交易詐欺訊號為真，但電信/裝置/地理（門號實名、device_changed、geo_jump…）為**與 isFraud 相關的半合成注入**（PaySim 無這些欄位，見 `synth.py: augment_cht_signals`）。
+- **指標以 PR-AUC 為準**（極度不平衡，勿看 accuracy）；ROC-AUC≈1.0 會被視為洩漏並警示。`metrics.json` 另含 recall@FPR1%/precision@100/MCC/混淆矩陣。
+- **安全**：mutating 端點（`/issue/*`、`/sdjwt/issue`、`/revoke`）可設 `API_KEY` 強制 `X-API-Key`；CORS 由 `CORS_ORIGIN` 收斂（見 `.env.example`）。
+
 ## 進階（落地說明）
 
 - 目前 PoC 用 **InMemory** 鏈閘道；要接 Polygon Amoy 真合約，見 `docs/amoy-deploy-checklist.md`（私鑰只放本機 `.env`，絕不入庫）。

@@ -14,4 +14,10 @@ export const config = {
   // did:ethr 用的網路名稱（落地時換 CHT BaaS）
   ethrNetwork: process.env.ETHR_NETWORK ?? "polygon:amoy",
   ethrChainId: Number(process.env.ETHR_CHAIN_ID ?? 80002),
+  // 階段 C：mutating 端點 API 金鑰（未設則 dev 放行並於啟動警示）
+  apiKey: process.env.API_KEY,
+  // 階段 C：CORS 允許來源（預設僅錢包前端）
+  corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
+  // 階段 B：本驗證方 aud 識別
+  verifierAud: process.env.VERIFIER_AUD ?? "chaintrust-verifier",
 };

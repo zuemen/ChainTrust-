@@ -27,7 +27,7 @@ async function main() {
   console.log(`[deploy] network=${net}`);
   console.log(`[deploy] deployer=${deployer.address}`);
   const balance = await ethers.provider.getBalance(deployer.address);
-  console.log(`[deploy] balance=${ethers.formatEther(balance)} ETH`);
+  console.log(`[deploy] balance=${ethers.formatEther(balance)} POL`);
 
   const IssuerRegistry = await ethers.getContractFactory("IssuerRegistry");
   const issuerRegistry = await IssuerRegistry.deploy();

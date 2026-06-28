@@ -6,7 +6,7 @@ import type { IIdentifier } from "@veramo/core";
 import type { ChainTrustAgent } from "./agent.js";
 import type { ChainGateway } from "./chain/gateway.js";
 import { credentialHash } from "./credentialHash.js";
-import { issuerAddressFromDid, secp256k1PublicKeyFromDidKey } from "./verifier.js";
+import { secp256k1PublicKeyFromDidKey, checkTrustAndRevocation } from "./verifier.js";
 import { REVOCATION_STATUS_TYPE } from "./issuer.js";
 
 /** KYC VC 中可選擇揭露的 claim（其餘如 iss/vct/sub/credentialStatus 常駐可見） */
@@ -322,34 +322,17 @@ export async function verifyKycSdJwtPresentation(
   const disclosed = KYC_SD_CLAIMS.filter((k) => k in payload);
   const withheld = KYC_SD_CLAIMS.filter((k) => !(k in payload));
 
-  // 2) 信任 issuer
-  let issuerAddress: string;
-  try {
-    issuerAddress = issuerAddressFromDid(String(payload.iss));
-    checks.trustedIssuer = await chain.isTrustedIssuer(issuerAddress);
-    if (!checks.trustedIssuer) {
-      return {
-        ok: false,
-        checks,
-        issuerAddress,
-        disclosed,
-        withheld,
-        reason: `Issuer 未被信任根背書：${issuerAddress}`,
-      };
-    }
-  } catch (e: any) {
-    return { ok: false, checks, disclosed, withheld, reason: `信任查詢失敗：${e?.message ?? e}` };
-  }
-
-  // 3) 未撤銷
-  const revocationKey = payload.credentialStatus?.revocationKey;
-  if (!revocationKey) {
-    return { ok: false, checks, issuerAddress, disclosed, withheld, reason: "出示缺 credentialStatus" };
-  }
-  const revoked = await chain.isRevoked(revocationKey);
-  checks.notRevoked = !revoked;
-  if (revoked) {
-    return { ok: false, checks, issuerAddress, disclosed, withheld, reason: "VC 已被撤銷" };
+  // 2)+3) 信任根 + 撤銷（與 verifier.ts 共用 helper）
+  const tr = await checkTrustAndRevocation(
+    chain,
+    String(payload.iss),
+    payload.credentialStatus?.revocationKey
+  );
+  checks.trustedIssuer = tr.trustedIssuer;
+  checks.notRevoked = tr.notRevoked;
+  const issuerAddress = tr.issuerAddress;
+  if (!tr.trustedIssuer || !tr.notRevoked) {
+    return { ok: false, checks, issuerAddress, disclosed, withheld, reason: tr.reason };
   }
 
   // 4) 述詞 kycLevel >= 門檻

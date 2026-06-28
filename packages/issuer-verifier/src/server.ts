@@ -45,14 +45,28 @@ async function main() {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
 
-  // 簡易 CORS（PoC：允許錢包前端跨來源呼叫）
-  app.use((_req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Content-Type");
+  // CORS：由 env CORS_ORIGIN 收斂（預設僅錢包前端），不再用萬用 *
+  app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", config.corsOrigin);
+    res.header("Vary", "Origin");
+    res.header("Access-Control-Allow-Headers", "Content-Type, X-API-Key");
     res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    if (_req.method === "OPTIONS") return res.sendStatus(204);
+    if (req.method === "OPTIONS") return res.sendStatus(204);
     next();
   });
+
+  // 500 統一處理：記錄完整錯誤、對外只回通用碼（不外洩內部訊息）
+  const serverError = (res: express.Response, e: unknown) => {
+    console.error("[issuer-verifier] internal error:", e);
+    res.status(500).json({ error: "internal_error" });
+  };
+
+  // mutating 端點守門：設了 API_KEY 才強制檢查 X-API-Key（dev 未設則放行）
+  const requireApiKey: express.RequestHandler = (req, res, next) => {
+    if (!config.apiKey) return next();
+    if (req.header("X-API-Key") === config.apiKey) return next();
+    return res.status(401).json({ error: "unauthorized" });
+  };
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, chainMode: config.chainMode, issuerDid: issuer.did, issuerAddr });
@@ -60,19 +74,19 @@ async function main() {
 
   // ── SD-JWT（M2.0/M2.2 錢包用）──
   // 簽發 SD-JWT KYCCredential 給 holder（缺 holderDid 則自動建一個）
-  app.post("/sdjwt/issue", async (req, res) => {
+  app.post("/sdjwt/issue", requireApiKey, async (req, res) => {
     try {
       let { holderDid, subject } = req.body ?? {};
       if (!holderDid) holderDid = (await createHolderDid(agent, `holder-${Date.now()}`)).did;
       const vc = await issueKycSdJwt({ issuer, holderDid, subject }, agent);
       res.json({ vc, holderDid, issuerDid: issuer.did });
     } catch (e: any) {
-      res.status(500).json({ error: e?.message ?? String(e) });
+      serverError(res, e);
     }
   });
 
   // 階段 B：驗證方核發一次性 nonce（防重放）。aud = 本驗證方識別。
-  const VERIFIER_AUD = process.env.VERIFIER_AUD ?? "chaintrust-verifier";
+  const VERIFIER_AUD = config.verifierAud;
   const issuedNonces = new Set<string>();
   app.post("/sdjwt/nonce", (_req, res) => {
     const nonce = randomUUID();
@@ -95,7 +109,7 @@ async function main() {
       );
       res.json({ presentation });
     } catch (e: any) {
-      res.status(500).json({ error: e?.message ?? String(e) });
+      serverError(res, e);
     }
   });
 
@@ -126,7 +140,7 @@ async function main() {
       }
       res.json({ verify, risk, outcome });
     } catch (e: any) {
-      res.status(500).json({ error: e?.message ?? String(e) });
+      serverError(res, e);
     }
   });
 
@@ -137,19 +151,19 @@ async function main() {
   });
 
   // 簽發 KYC VC
-  app.post("/issue/kyc", async (req, res) => {
+  app.post("/issue/kyc", requireApiKey, async (req, res) => {
     try {
       const { holderDid, subject } = req.body ?? {};
       if (!holderDid) return res.status(400).json({ error: "缺 holderDid" });
       const vc = await issueKYCCredential(agent, { issuerDid: issuer.did, holderDid, subject });
       res.json({ vc, revocationKey: revocationKeyOf(vc) });
     } catch (e: any) {
-      res.status(500).json({ error: e?.message ?? String(e) });
+      serverError(res, e);
     }
   });
 
   // 簽發 門號實名 VC
-  app.post("/issue/mobile", async (req, res) => {
+  app.post("/issue/mobile", requireApiKey, async (req, res) => {
     try {
       const { holderDid, msisdn } = req.body ?? {};
       if (!holderDid || !msisdn) return res.status(400).json({ error: "缺 holderDid 或 msisdn" });
@@ -160,7 +174,7 @@ async function main() {
       });
       res.json({ vc, revocationKey: revocationKeyOf(vc) });
     } catch (e: any) {
-      res.status(500).json({ error: e?.message ?? String(e) });
+      serverError(res, e);
     }
   });
 
@@ -172,7 +186,7 @@ async function main() {
       const result = await verifyCredential(agent, chain, vc);
       res.json(result);
     } catch (e: any) {
-      res.status(500).json({ error: e?.message ?? String(e) });
+      serverError(res, e);
     }
   });
 
@@ -184,7 +198,7 @@ async function main() {
       const result = await verifyAndScore(agent, chain, vc, tx ?? {});
       res.json(result);
     } catch (e: any) {
-      res.status(500).json({ error: e?.message ?? String(e) });
+      serverError(res, e);
     }
   });
 
@@ -193,25 +207,29 @@ async function main() {
     try {
       res.json(await scoreTransaction(req.body ?? {}));
     } catch (e: any) {
-      res.status(500).json({ error: e?.message ?? String(e) });
+      serverError(res, e);
     }
   });
 
   // 撤銷 VC（dev：記憶體或具私鑰的 ethers 模式）
-  app.post("/revoke", async (req, res) => {
+  app.post("/revoke", requireApiKey, async (req, res) => {
     try {
       const { revocationKey } = req.body ?? {};
       if (!revocationKey) return res.status(400).json({ error: "缺 revocationKey" });
       await chain.revoke(revocationKey);
       res.json({ revoked: true, revocationKey });
     } catch (e: any) {
-      res.status(500).json({ error: e?.message ?? String(e) });
+      serverError(res, e);
     }
   });
 
   app.listen(config.port, () => {
     console.log(`[issuer-verifier] 服務啟動 http://localhost:${config.port}`);
     console.log(`[issuer-verifier] chainMode=${config.chainMode} issuer=${issuer.did}`);
+    console.log(`[issuer-verifier] CORS=${config.corsOrigin}`);
+    if (!config.apiKey) {
+      console.warn("[issuer-verifier] ⚠ 未設 API_KEY：mutating 端點未保護（dev 模式）。正式請設 .env API_KEY");
+    }
   });
 }
 

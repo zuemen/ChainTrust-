@@ -56,6 +56,8 @@ pnpm smoke
 
 現場操作腳本見 [`docs/DEMO.md`](docs/DEMO.md)。
 
+> **注意**：`model.joblib`／`metrics.json` 不入庫，首次須 `pnpm ai:train` 產生（未訓練時 `/score` 自動退回規則 baseline）。即使用真 PaySim，電信／裝置／地理訊號為**半合成注入**；模型品質以 **PR-AUC** 為準。mutating 端點可用 `API_KEY` 保護、CORS 由 `CORS_ORIGIN` 收斂（見 `.env.example`）。
+
 各套件單獨啟動：
 
 ```shell
