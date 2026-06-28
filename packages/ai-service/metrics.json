@@ -1,73 +1,120 @@
 {
   "source": "synthetic (PaySim-like)",
   "rows": 40000,
-  "fraud": 3289,
+  "fraud": 3712,
   "primary_metric": "PR-AUC",
-  "fraud_prevalence": 0.0802,
-  "holdout_pr_auc": 0.8554,
-  "holdout_roc_auc": 0.9156,
-  "holdout_auc": 0.9156,
-  "recall_at_fpr_1pct": 0.8399,
-  "precision_at_100": 0.98,
-  "mcc": 0.9052,
-  "threshold": 0.13,
-  "recall_at_threshold": 0.8399,
+  "fraud_prevalence": 0.0945,
+  "holdout_pr_auc": 0.8611,
+  "holdout_roc_auc": 0.9271,
+  "holdout_auc": 0.9271,
+  "recall_at_fpr_1pct": 0.8501,
+  "precision_at_100": 0.99,
+  "mcc": 0.9023,
+  "threshold": 0.05,
+  "recall_at_threshold": 0.8501,
   "confusion_at_threshold": {
-    "tp": 404,
-    "fp": 4,
-    "fn": 77,
-    "tn": 5515
+    "tp": 482,
+    "fp": 12,
+    "fn": 85,
+    "tn": 5421
   },
   "calibration": "isotonic",
+  "calibration_quality": {
+    "ece": 0.001,
+    "brier": 0.016,
+    "reliability_curve": [
+      {
+        "pred_mean": 0.0161,
+        "frac_fraud": 0.0154,
+        "count": 5506
+      },
+      {
+        "pred_mean": 0.9806,
+        "frac_fraud": 0.9757,
+        "count": 494
+      }
+    ]
+  },
+  "baselines": {
+    "rules_only": {
+      "pr_auc": 0.8362,
+      "roc_auc": 0.9129
+    },
+    "logistic_regression": {
+      "pr_auc": 0.8732,
+      "roc_auc": 0.9266
+    },
+    "lightgbm": {
+      "pr_auc": 0.8611,
+      "roc_auc": 0.9271
+    }
+  },
+  "cht_signal_ablation": {
+    "without_cht_pr_auc": 0.7394,
+    "with_cht_pr_auc": 0.8611,
+    "lift_pr_auc": 0.1216,
+    "lift_pct": 16.45,
+    "signals": [
+      "tx_count_1h",
+      "tx_count_24h",
+      "device_changed",
+      "mobile_realname_verified",
+      "vc_age_days",
+      "account_age_days",
+      "cross_institution_presentations",
+      "payee_risk",
+      "geo_jump"
+    ]
+  },
   "split": "out-of-time (by step)",
   "top_feature_importances": [
     {
-      "feature": "account_age_days",
-      "importance": 572
+      "feature": "drain_ratio",
+      "importance": 289
     },
     {
-      "feature": "errorBalanceDest",
-      "importance": 475
+      "feature": "account_age_days",
+      "importance": 278
     },
     {
       "feature": "vc_age_days",
-      "importance": 467
-    },
-    {
-      "feature": "drain_ratio",
-      "importance": 426
-    },
-    {
-      "feature": "errorBalanceOrig",
-      "importance": 409
-    },
-    {
-      "feature": "newbalanceDest",
-      "importance": 408
+      "importance": 271
     },
     {
       "feature": "payee_risk",
-      "importance": 408
+      "importance": 201
+    },
+    {
+      "feature": "errorBalanceDest",
+      "importance": 199
     },
     {
       "feature": "oldbalanceDest",
-      "importance": 395
+      "importance": 182
     },
     {
-      "feature": "oldbalanceOrg",
-      "importance": 336
-    },
-    {
-      "feature": "newbalanceOrig",
-      "importance": 307
-    },
-    {
-      "feature": "amount",
-      "importance": 272
+      "feature": "newbalanceDest",
+      "importance": 181
     },
     {
       "feature": "tx_count_24h",
-      "importance": 209
+      "importance": 179
+    },
+    {
+      "feature": "cross_institution_presentations",
+      "importance": 179
+    },
+    {
+      "feature": "amount",
+      "importance": 172
+    },
+    {
+      "feature": "newbalanceOrig",
+      "importance": 153
+    },
+    {
+      "feature": "oldbalanceOrg",
+      "importance": 134
     }
   ]
 }

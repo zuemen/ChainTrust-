@@ -20,8 +20,12 @@ import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.frozen import FrozenEstimator
 from sklearn.ensemble import IsolationForest
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     average_precision_score,
+    brier_score_loss,
     matthews_corrcoef,
     recall_score,
     roc_auc_score,
@@ -34,9 +38,48 @@ sys.path.insert(0, HERE)
 
 from app.featurize import FEATURE_ORDER, featurize  # noqa: E402
 from app.graph import compute_account_graph, apply_graph_features  # noqa: E402
+from app.rules import rule_risk  # noqa: E402
 
 DATA_CSV = os.path.join(HERE, "data", "paysim.csv")
 MODEL_OUT = os.path.join(HERE, "model.joblib")
+
+
+def fit_calibrated_lgbm(Xtr, ytr, Xva, yva):
+    """訓練 LightGBM 並用驗證集做 isotonic 校準，回傳 (raw_clf, calibrated)。"""
+    pos = max(1, int(ytr.sum()))
+    neg = max(1, len(ytr) - pos)
+    clf = lgb.LGBMClassifier(
+        n_estimators=400, learning_rate=0.05, num_leaves=31,
+        subsample=0.9, colsample_bytree=0.9,
+        scale_pos_weight=neg / pos, random_state=42, verbose=-1,
+    )
+    clf.fit(
+        Xtr, ytr, eval_set=[(Xva, yva)], eval_metric="auc",
+        callbacks=[lgb.early_stopping(50, verbose=False), lgb.log_evaluation(0)],
+    )
+    calibrated = CalibratedClassifierCV(FrozenEstimator(clf), method="isotonic")
+    calibrated.fit(Xva, yva)
+    return clf, calibrated
+
+
+def expected_calibration_error(y, p, bins: int = 10) -> tuple[float, list[dict]]:
+    """ECE（期望校準誤差）+ 可靠度曲線資料（每桶平均預測 vs 實際詐欺率）。"""
+    y = np.asarray(y, dtype=float)
+    p = np.asarray(p, dtype=float)
+    edges = np.linspace(0.0, 1.0, bins + 1)
+    ece = 0.0
+    curve: list[dict] = []
+    for i in range(bins):
+        lo, hi = edges[i], edges[i + 1]
+        mask = (p >= lo) & (p < hi) if i < bins - 1 else (p >= lo) & (p <= hi)
+        cnt = int(mask.sum())
+        if cnt == 0:
+            continue
+        conf = float(p[mask].mean())
+        acc = float(y[mask].mean())
+        ece += abs(conf - acc) * cnt / len(p)
+        curve.append({"pred_mean": round(conf, 4), "frac_fraud": round(acc, 4), "count": cnt})
+    return float(ece), curve
 
 def load_data() -> tuple[pd.DataFrame, str]:
     if os.path.exists(DATA_CSV):
@@ -78,22 +121,9 @@ def main() -> None:
     Xva, yva = to_matrix(val), val["isFraud"].to_numpy()
     Xte, yte = to_matrix(test), test["isFraud"].to_numpy()
 
-    pos = max(1, int(ytr.sum()))
-    neg = max(1, len(ytr) - pos)
-    clf = lgb.LGBMClassifier(
-        n_estimators=400, learning_rate=0.05, num_leaves=31,
-        subsample=0.9, colsample_bytree=0.9,
-        scale_pos_weight=neg / pos, random_state=42, verbose=-1,
-    )
-    clf.fit(
-        Xtr, ytr, eval_set=[(Xva, yva)], eval_metric="auc",
-        callbacks=[lgb.early_stopping(50, verbose=False), lgb.log_evaluation(0)],
-    )
-
     # 機率校準（isotonic）：用驗證集校準已訓練的 LGBM，使風險分數有意義
     # sklearn>=1.6：以 FrozenEstimator 包裝已訓練模型（取代舊 cv="prefit"）
-    calibrated = CalibratedClassifierCV(FrozenEstimator(clf), method="isotonic")
-    calibrated.fit(Xva, yva)
+    clf, calibrated = fit_calibrated_lgbm(Xtr, ytr, Xva, yva)
 
     def proba_of(X: np.ndarray) -> np.ndarray:
         return calibrated.predict_proba(X)[:, 1]
@@ -135,6 +165,37 @@ def main() -> None:
     print(f"[train] 人頭召回@thr={best_thr:.2f}    = {recall:.4f}")
     if roc >= 0.999:
         print("[train] ⚠ ROC-AUC≈1.0：極可能資料洩漏或過擬，請以 PR-AUC 與 out-of-time 為準")
+
+    # ── 校準品質（ECE + Brier + 可靠度曲線）：證明「風險分數＝真實詐欺機率」 ──
+    ece, reliability = expected_calibration_error(yte, proba, bins=10)
+    brier = float(brier_score_loss(yte, proba))
+    print(f"[train] 校準 ECE={ece:.4f}  Brier={brier:.4f}（越低越準）")
+
+    # ── 基線對照：規則 baseline vs Logistic Regression vs LightGBM（證明模型選型有依據）──
+    rules_score = np.array([rule_risk(r)[0] / 100.0 for r in test.to_dict("records")])
+    rules_pr = float(average_precision_score(yte, rules_score))
+    rules_roc = float(roc_auc_score(yte, rules_score))
+
+    lr = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42),
+    )
+    lr.fit(Xtr, ytr)
+    lr_proba = lr.predict_proba(Xte)[:, 1]
+    lr_pr = float(average_precision_score(yte, lr_proba))
+    lr_roc = float(roc_auc_score(yte, lr_proba))
+    print(f"[train] 基線 PR-AUC  rules={rules_pr:.4f}  LR={lr_pr:.4f}  LGBM={pr_auc:.4f}")
+
+    # ── CHT 訊號增益消融：移除中華電信門號實名/裝置/地理等訊號後重訓，量化能力提升 ──
+    from synth import CHT_SIGNAL_COLS
+    cht_cols = [c for c in CHT_SIGNAL_COLS if c in FEATURE_ORDER]
+    keep_idx = [i for i, name in enumerate(FEATURE_ORDER) if name not in cht_cols]
+    _, ablate_cal = fit_calibrated_lgbm(Xtr[:, keep_idx], ytr, Xva[:, keep_idx], yva)
+    ablate_proba = ablate_cal.predict_proba(Xte[:, keep_idx])[:, 1]
+    ablate_pr = float(average_precision_score(yte, ablate_proba))
+    lift = float(pr_auc) - ablate_pr
+    lift_pct = round(100.0 * lift / ablate_pr, 2) if ablate_pr > 0 else 0.0
+    print(f"[train] CHT 訊號增益：無 CHT PR-AUC={ablate_pr:.4f} → 全特徵={pr_auc:.4f}（+{lift:.4f}, +{lift_pct}%）")
 
     # IsolationForest 用正常樣本訓練；contamination 依實際詐欺率（夾在合理範圍）
     contamination = float(min(0.2, max(0.01, ytr.mean())))
@@ -184,6 +245,23 @@ def main() -> None:
         "recall_at_threshold": round(float(recall), 4),
         "confusion_at_threshold": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
         "calibration": "isotonic",
+        "calibration_quality": {
+            "ece": round(ece, 4),
+            "brier": round(brier, 4),
+            "reliability_curve": reliability,
+        },
+        "baselines": {
+            "rules_only": {"pr_auc": round(rules_pr, 4), "roc_auc": round(rules_roc, 4)},
+            "logistic_regression": {"pr_auc": round(lr_pr, 4), "roc_auc": round(lr_roc, 4)},
+            "lightgbm": {"pr_auc": round(float(pr_auc), 4), "roc_auc": round(float(roc), 4)},
+        },
+        "cht_signal_ablation": {
+            "without_cht_pr_auc": round(ablate_pr, 4),
+            "with_cht_pr_auc": round(float(pr_auc), 4),
+            "lift_pr_auc": round(lift, 4),
+            "lift_pct": lift_pct,
+            "signals": cht_cols,
+        },
         "split": "out-of-time (by step)",
         "top_feature_importances": importances,
     }

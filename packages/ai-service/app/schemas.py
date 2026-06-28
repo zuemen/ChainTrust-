@@ -50,5 +50,9 @@ class ScoreResponse(BaseModel):
     source: Literal["model", "rules"] = "rules"
     p_fraud: float | None = None
     anomaly: float | None = None
+    # 本筆判斷的信心 0-1（模型模式＝二分類確定度；規則模式＝距決策門檻的裕度）
+    confidence: float | None = None
+    # 信心等級（high/medium/low），供前端/agent 直接呈現「高信心攔截」等用語
+    confidence_band: Literal["high", "medium", "low"] | None = None
     # 可解釋：本筆判斷的前幾大推升因素
     top_factors: list[TopFactor] = Field(default_factory=list)

@@ -130,6 +130,45 @@ def test_graph_features_absent_when_no_accounts():
     assert out["account_graph_risk"].iloc[0] == 0.0
 
 
+# ── 信心值（confidence）──
+def test_prob_confidence_monotonic():
+    from app.model import prob_confidence
+    assert prob_confidence(0.5) <= 0.01          # 最不確定
+    assert prob_confidence(0.99) > prob_confidence(0.7) > prob_confidence(0.55)
+    assert prob_confidence(0.01) > prob_confidence(0.3)   # 對「正常」也可以很有信心
+    assert 0.0 <= prob_confidence(0.5) <= 1.0
+
+
+def test_confidence_band_thresholds():
+    from app.model import confidence_band
+    assert confidence_band(0.9) == "high"
+    assert confidence_band(0.5) == "medium"
+    assert confidence_band(0.1) == "low"
+
+
+def test_score_returns_confidence():
+    """/score 每筆都附 confidence(0-1) 與 confidence_band，供前端/agent 呈現信心。"""
+    mule = next(s for s in _samples() if s["label"] == "mule_transfer_drain")
+    body = client.post("/score", json=mule["ctx"]).json()
+    assert 0.0 <= body["confidence"] <= 1.0
+    assert body["confidence_band"] in ("high", "medium", "low")
+
+
+# ── 評估工具：ECE（期望校準誤差）──
+def test_expected_calibration_error():
+    import sys, os
+    sys.path.insert(0, os.path.dirname(HERE))
+    from train import expected_calibration_error
+    # 完美校準：預測機率＝實際頻率 → ECE≈0
+    y = [0, 0, 1, 1]
+    p = [0.0, 0.0, 1.0, 1.0]
+    ece, curve = expected_calibration_error(y, p, bins=10)
+    assert ece < 1e-6 and isinstance(curve, list)
+    # 反向預測 → ECE 應很大
+    ece_bad, _ = expected_calibration_error([0, 1], [1.0, 0.0], bins=10)
+    assert ece_bad > 0.9
+
+
 def test_graph_apply_train_only_no_future_edges():
     """以訓練期圖譜套用到測試列：fan_in 來自訓練邊，不因測試列新增而改變（防時間洩漏）。"""
     import pandas as pd

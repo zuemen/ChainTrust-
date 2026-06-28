@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import math
 import os
 from typing import Any, Mapping
 
@@ -51,6 +52,29 @@ def decide(risk: int) -> str:
     return "pass"
 
 
+def prob_confidence(p_fraud: float) -> float:
+    """模型確定度 ∈[0,1]：用二分類熵的補數。p 越接近 0 或 1 越確定，0.5 最不確定。"""
+    p = min(1.0 - 1e-9, max(1e-9, float(p_fraud)))
+    entropy = -(p * math.log2(p) + (1.0 - p) * math.log2(1.0 - p))  # 0..1
+    return round(1.0 - entropy, 4)
+
+
+def rule_confidence(risk: int) -> float:
+    """規則模式信心：以風險分數距最近決策門檻（0/40/70/100）的裕度衡量。"""
+    boundaries = (0, PASS_MAX, BLOCK_MIN, 100)
+    nearest = min(abs(risk - b) for b in boundaries)
+    # 一個 band 內最大裕度約 15 分（70→100 帶較寬，取 15 為基準），夾在 0..1
+    return round(min(1.0, nearest / 15.0), 4)
+
+
+def confidence_band(conf: float) -> str:
+    if conf >= 0.75:
+        return "high"
+    if conf >= 0.4:
+        return "medium"
+    return "low"
+
+
 def _top_factors_from_model(bundle: dict, x: list[list[float]], k: int = 3) -> list[TopFactor]:
     """用 LightGBM SHAP 貢獻取「推升風險」前 k 大特徵（log-odds 空間，正值=更像詐欺）。"""
     try:
@@ -81,11 +105,14 @@ def score(row: Mapping[str, Any]) -> ScoreResponse:
     bundle = _load()
     if bundle is None:
         risk, codes = rule_risk(row)
+        conf = rule_confidence(risk)
         return ScoreResponse(
             risk=risk,
             decision=decide(risk),
             reasons=codes,
             source="rules",
+            confidence=conf,
+            confidence_band=confidence_band(conf),
             top_factors=_top_factors_from_rules(codes),
         )
 
@@ -118,6 +145,7 @@ def score(row: Mapping[str, Any]) -> ScoreResponse:
     if not top:
         top = _top_factors_from_rules(codes)
 
+    conf = prob_confidence(p_fraud)
     return ScoreResponse(
         risk=risk,
         decision=decide(risk),
@@ -125,5 +153,7 @@ def score(row: Mapping[str, Any]) -> ScoreResponse:
         source="model",
         p_fraud=round(p_fraud, 4),
         anomaly=round(anomaly_norm, 4),
+        confidence=conf,
+        confidence_band=confidence_band(conf),
         top_factors=top,
     )

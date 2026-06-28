@@ -73,7 +73,7 @@
     },
     {
       "label": "structuring_smurf",
-      "expect": "pass",
+      "expect": "block",
       "ctx": {
         "type": "TRANSFER", "amount": 49000, "oldbalanceOrg": 300000, "newbalanceOrig": 251000,
         "oldbalanceDest": 10000, "newbalanceDest": 59000, "tx_count_1h": 9, "tx_count_24h": 38,
