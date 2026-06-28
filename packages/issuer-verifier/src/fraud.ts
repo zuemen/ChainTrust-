@@ -19,11 +19,22 @@ export interface TxContext {
   account_age_days?: number;
 }
 
+export interface TopFactor {
+  feature: string;
+  label: string;
+  impact: number;
+}
+
 export interface RiskAssessment {
   risk: number | null;
   decision: "pass" | "review" | "block";
   reasons: string[];
   source: "model" | "rules" | "unavailable";
+  p_fraud?: number | null;
+  anomaly?: number | null;
+  confidence?: number | null;
+  confidence_band?: "high" | "medium" | "low" | null;
+  top_factors?: TopFactor[];
 }
 
 /**
@@ -57,6 +68,25 @@ export async function scoreTransaction(
       reasons: ["FRAUD_SERVICE_UNAVAILABLE"],
       source: "unavailable",
     };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 取得 AI 模型評估報告（PR-AUC、校準、基線、CHT 增益）。供前端可信度報告/簡報。 */
+export async function fetchMetrics(
+  opts?: { baseUrl?: string; timeoutMs?: number; fetchImpl?: typeof fetch }
+): Promise<{ available: boolean; model_loaded?: boolean; metrics?: unknown }> {
+  const baseUrl = opts?.baseUrl ?? config.aiServiceUrl;
+  const doFetch = opts?.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts?.timeoutMs ?? 5000);
+  try {
+    const res = await doFetch(`${baseUrl}/metrics`, { signal: controller.signal });
+    if (!res.ok) return { available: false };
+    return (await res.json()) as { available: boolean; model_loaded?: boolean; metrics?: unknown };
+  } catch {
+    return { available: false };
   } finally {
     clearTimeout(timer);
   }

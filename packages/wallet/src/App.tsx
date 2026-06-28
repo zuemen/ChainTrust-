@@ -3,8 +3,10 @@ import {
   issueKyc,
   verifyPresentation,
   health,
+  getMetrics,
   type TxContext,
   type VerifyResponse,
+  type ModelMetrics,
 } from "./api.ts";
 import { parseSdJwt, buildPresentation, type ParsedSdJwt } from "./sdjwt.ts";
 
@@ -21,6 +23,11 @@ const CLAIM_LABELS: Record<string, { label: string; pii: boolean }> = {
 
 const REASON_LABELS: Record<string, string> = {
   MULE_PATTERN: "人頭金流樣態（大額轉出後帳戶清空）",
+  PASS_THROUGH: "過水帳戶（資金進來即清空轉出）",
+  STRUCTURING: "結構化拆分（金額壓在通報門檻下）",
+  RAPID_MOVEMENT: "快速資金移動（高頻＋大額清空）",
+  FAN_IN_COLLECTION: "聚合戶（多來源匯入單一帳戶）",
+  MULE_RING: "人頭環（帳戶圖譜高風險）",
   NO_REALNAME: "未通過門號實名（CHT 電子卡）",
   VELOCITY: "短時間高頻交易",
   DEVICE_CHANGE: "裝置變更",
@@ -31,6 +38,8 @@ const REASON_LABELS: Record<string, string> = {
   MODEL_ANOMALY: "模型偵測到異常樣態",
   FRAUD_SERVICE_UNAVAILABLE: "反詐服務暫時無法連線（保守標記）",
 };
+
+const CONF_LABELS: Record<string, string> = { high: "高信心", medium: "中等信心", low: "低信心" };
 
 const SCENARIOS: Record<string, { title: string; desc: string; tx: TxContext }> = {
   normal: {
@@ -69,6 +78,7 @@ export function App() {
   const [result, setResult] = useState<VerifyResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
+  const [metrics, setMetrics] = useState<ModelMetrics | null>(null);
 
   const parsed: ParsedSdJwt | null = useMemo(() => {
     if (!vc) return null;
@@ -77,6 +87,7 @@ export function App() {
 
   useEffect(() => {
     health().then((h) => { setOnline(h.ok); setIssuerDid(h.issuerDid); }).catch(() => setOnline(false));
+    getMetrics().then((m) => { if (m.available && m.metrics) setMetrics(m.metrics); }).catch(() => {});
   }, []);
 
   async function handleIssue() {
@@ -242,6 +253,13 @@ export function App() {
                 <span className="risk-score">{result.risk.risk ?? "—"}<small>/100</small></span>
               </div>
               <div className="risk-decision">{decisionLabel(result.risk.decision)}</div>
+              {result.risk.confidence != null && (
+                <div className={`conf ${result.risk.confidence_band ?? ""}`}>
+                  <span>判斷信心</span>
+                  <div className="conf-bar"><i style={{ width: `${Math.round((result.risk.confidence ?? 0) * 100)}%` }} /></div>
+                  <b>{CONF_LABELS[result.risk.confidence_band ?? ""] ?? ""} {Math.round((result.risk.confidence ?? 0) * 100)}%</b>
+                </div>
+              )}
               {result.risk.reasons.length > 0 && (
                 <ul className="reasons">
                   {result.risk.reasons.map((rc) => <li key={rc}>{REASON_LABELS[rc] ?? rc}</li>)}
@@ -267,8 +285,70 @@ export function App() {
         </section>
       )}
 
+      {metrics && <ModelTrust m={metrics} />}
+
       <footer>PoC · 僅測試網 · CHT 整合點為 mock｜<code>{shortDid(issuerDid)}</code></footer>
     </div>
+  );
+}
+
+function ModelTrust({ m }: { m: ModelMetrics }) {
+  const pct = (v?: number) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+  const ablation = m.cht_signal_ablation;
+  const cal = m.calibration_quality;
+  const baselines = m.baselines ?? {};
+  const maxBaseline = Math.max(0.001, ...Object.values(baselines).map((b) => b.pr_auc));
+  const BASE_LABELS: Record<string, string> = {
+    rules_only: "規則 baseline",
+    logistic_regression: "邏輯迴歸",
+    lightgbm: "LightGBM（本系統）",
+  };
+  return (
+    <section className="card trust">
+      <div className="card-h"><h2>模型可信度報告</h2><span className="tag">out-of-time holdout</span></div>
+
+      <div className="kpis">
+        <div className="kpi"><b>{pct(m.holdout_pr_auc)}</b><span>PR-AUC（主指標）</span></div>
+        <div className="kpi"><b>{pct(m.recall_at_fpr_1pct)}</b><span>誤殺 1% 下的攔截率</span></div>
+        <div className="kpi"><b>{cal ? cal.ece.toFixed(3) : "—"}</b><span>校準誤差 ECE（越低越準）</span></div>
+      </div>
+
+      {ablation && (
+        <div className="ablation">
+          <h3>中華電信身分訊號的反詐增益</h3>
+          <div className="ab-row">
+            <span>無 CHT 訊號</span>
+            <div className="ab-bar"><i style={{ width: `${(ablation.without_cht_pr_auc / Math.max(ablation.with_cht_pr_auc, 0.001)) * 100}%` }} /></div>
+            <b>{pct(ablation.without_cht_pr_auc)}</b>
+          </div>
+          <div className="ab-row gain">
+            <span>＋CHT 訊號</span>
+            <div className="ab-bar"><i style={{ width: "100%" }} /></div>
+            <b>{pct(ablation.with_cht_pr_auc)}</b>
+          </div>
+          <p className="lift">門號實名／裝置／地理／帳戶年齡等身分訊號，使反詐 PR-AUC 提升 <b>+{ablation.lift_pct}%</b>。</p>
+        </div>
+      )}
+
+      {Object.keys(baselines).length > 0 && (
+        <div className="ablation">
+          <h3>與基線方法對照（PR-AUC）</h3>
+          {Object.entries(baselines).map(([k, b]) => (
+            <div key={k} className={`ab-row ${k === "lightgbm" ? "gain" : ""}`}>
+              <span>{BASE_LABELS[k] ?? k}</span>
+              <div className="ab-bar"><i style={{ width: `${(b.pr_auc / maxBaseline) * 100}%` }} /></div>
+              <b>{pct(b.pr_auc)}</b>
+            </div>
+          ))}
+          <p className="lift">LightGBM 另提供每筆 SHAP 可解釋、異常偵測與帳戶圖譜，為線性模型所無。</p>
+        </div>
+      )}
+
+      <p className="trust-foot">
+        資料：{m.source ?? "—"}（{m.rows?.toLocaleString() ?? "—"} 筆，詐欺 {m.fraud?.toLocaleString() ?? "—"} 筆）·
+        時間切分驗證 · isotonic 機率校準
+      </p>
+    </section>
   );
 }
 

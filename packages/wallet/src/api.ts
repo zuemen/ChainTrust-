@@ -26,7 +26,40 @@ export interface RiskAssessment {
   decision: "pass" | "review" | "block";
   reasons: string[];
   source: string;
+  p_fraud?: number | null;
+  anomaly?: number | null;
+  confidence?: number | null;
+  confidence_band?: "high" | "medium" | "low" | null;
   top_factors?: TopFactor[];
+}
+
+/** AI 模型評估報告（GET /metrics）。 */
+export interface ModelMetrics {
+  primary_metric?: string;
+  fraud_prevalence?: number;
+  holdout_pr_auc?: number;
+  holdout_roc_auc?: number;
+  recall_at_fpr_1pct?: number;
+  precision_at_100?: number;
+  mcc?: number;
+  rows?: number;
+  fraud?: number;
+  source?: string;
+  calibration_quality?: { ece: number; brier: number; reliability_curve?: unknown[] };
+  baselines?: Record<string, { pr_auc: number; roc_auc: number }>;
+  cht_signal_ablation?: {
+    without_cht_pr_auc: number;
+    with_cht_pr_auc: number;
+    lift_pr_auc: number;
+    lift_pct: number;
+    signals: string[];
+  };
+}
+
+export interface MetricsResponse {
+  available: boolean;
+  model_loaded?: boolean;
+  metrics?: ModelMetrics;
 }
 
 export interface SdJwtVerifyResult {
@@ -74,4 +107,10 @@ export async function verifyPresentation(
   tx: TxContext
 ): Promise<VerifyResponse> {
   return postJson("/sdjwt/verify", { presentation, tx });
+}
+
+export async function getMetrics(): Promise<MetricsResponse> {
+  const res = await fetch(`${BASE}/metrics`);
+  if (!res.ok) return { available: false };
+  return res.json() as Promise<MetricsResponse>;
 }

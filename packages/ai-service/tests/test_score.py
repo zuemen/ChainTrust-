@@ -27,6 +27,19 @@ def test_health():
     assert r.json()["ok"] is True
 
 
+def test_metrics_endpoint():
+    """/metrics 回評估報告（模型已訓練時含 PR-AUC / 校準 / 基線 / CHT 增益）。"""
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    body = r.json()
+    assert "available" in body
+    if body["available"]:
+        m = body["metrics"]
+        assert "holdout_pr_auc" in m
+        assert "cht_signal_ablation" in m and "lift_pct" in m["cht_signal_ablation"]
+        assert "calibration_quality" in m and "ece" in m["calibration_quality"]
+
+
 def test_decision_thresholds():
     assert decide(0) == "pass"
     assert decide(39) == "pass"

@@ -121,6 +121,32 @@ code { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 12px; c
 .reasons { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: #cdd6f5; }
 .reasons li { margin: 3px 0; }
 
+/* 判斷信心 */
+.conf { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin: 8px 0 4px; font-size: 12.5px; color: var(--muted); }
+.conf-bar { height: 7px; background: #0e1530; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.conf-bar i { display: block; height: 100%; background: var(--muted); }
+.conf.high .conf-bar i { background: var(--ok); }
+.conf.medium .conf-bar i { background: var(--warn); }
+.conf.low .conf-bar i { background: var(--bad); }
+.conf b { font-variant-numeric: tabular-nums; color: var(--txt); }
+
+/* 模型可信度報告 */
+.trust .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.trust .kpi { background: #0e1530; border: 1px solid var(--line); border-radius: 10px; padding: 12px; text-align: center; }
+.trust .kpi b { display: block; font-size: 22px; font-weight: 800; color: var(--brand2); font-variant-numeric: tabular-nums; }
+.trust .kpi span { font-size: 11px; color: var(--muted); }
+.ablation { margin: 12px 0; }
+.ablation h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); }
+.ab-row { display: grid; grid-template-columns: 120px 1fr 54px; align-items: center; gap: 10px; font-size: 12.5px; margin: 5px 0; }
+.ab-bar { height: 12px; background: #0e1530; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.ab-bar i { display: block; height: 100%; background: var(--muted); border-radius: 6px; transition: width 0.5s; }
+.ab-row.gain .ab-bar i { background: linear-gradient(90deg, var(--brand), var(--brand2)); }
+.ab-row b { text-align: right; font-variant-numeric: tabular-nums; }
+.ab-row.gain b { color: var(--brand2); }
+.lift { font-size: 12.5px; color: #cdd6f5; margin: 6px 0 0; }
+.lift b { color: var(--ok); }
+.trust-foot { font-size: 11px; color: var(--muted); margin: 12px 0 0; line-height: 1.6; }
+
 .banner { border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 14px; }
 .banner.err { background: rgba(239,68,68,0.15); border: 1px solid var(--bad); }
 .banner.warn { background: rgba(245,158,11,0.13); border: 1px solid var(--warn); }

@@ -10,7 +10,7 @@ import { issueKYCCredential, issueMobileRealNameCredential, revocationKeyOf } fr
 import { verifyCredential, verifyAndScore } from "./verifier.js";
 import { issueKycSdJwt, presentKycWithKeyBinding, verifyKycSdJwtPresentation } from "./sdjwt.js";
 import { randomUUID } from "crypto";
-import { scoreTransaction } from "./fraud.js";
+import { scoreTransaction, fetchMetrics } from "./fraud.js";
 import { issuerAddressFromIdentifier } from "./credentialHash.js";
 import { config } from "./config.js";
 
@@ -206,6 +206,15 @@ async function main() {
   app.post("/score", async (req, res) => {
     try {
       res.json(await scoreTransaction(req.body ?? {}));
+    } catch (e: any) {
+      serverError(res, e);
+    }
+  });
+
+  // AI 模型評估報告代理（PR-AUC / 校準 / 基線 / CHT 增益）→ 前端可信度報告
+  app.get("/metrics", async (_req, res) => {
+    try {
+      res.json(await fetchMetrics());
     } catch (e: any) {
       serverError(res, e);
     }
