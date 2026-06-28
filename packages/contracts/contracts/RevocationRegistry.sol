@@ -22,17 +22,21 @@ contract RevocationRegistry {
     event CredentialRevoked(bytes32 indexed credentialHash, address indexed issuer);
     event CredentialUnrevoked(bytes32 indexed credentialHash, address indexed issuer);
 
+    /// @notice IssuerRegistry 位址不可為零
+    error ZeroRegistry();
+    /// @notice 呼叫者非受信任根背書的簽發者
+    error UntrustedIssuer();
+    /// @notice 呼叫者非此 VC 綁定的簽發者
+    error NotCredentialIssuer();
+
     constructor(address issuerRegistry_) {
-        require(issuerRegistry_ != address(0), "RevocationRegistry: zero registry");
+        if (issuerRegistry_ == address(0)) revert ZeroRegistry();
         issuerRegistry = IIssuerRegistry(issuerRegistry_);
     }
 
     /// @dev 僅信任根背書的簽發者可呼叫
     modifier onlyTrustedIssuer() {
-        require(
-            issuerRegistry.isTrustedIssuer(msg.sender),
-            "RevocationRegistry: untrusted issuer"
-        );
+        if (!issuerRegistry.isTrustedIssuer(msg.sender)) revert UntrustedIssuer();
         _;
     }
 
@@ -41,8 +45,8 @@ contract RevocationRegistry {
         address issuer = issuerOf[credentialHash];
         if (issuer == address(0)) {
             issuerOf[credentialHash] = msg.sender;
-        } else {
-            require(issuer == msg.sender, "RevocationRegistry: not issuer");
+        } else if (issuer != msg.sender) {
+            revert NotCredentialIssuer();
         }
         _revoked[credentialHash] = true;
         emit CredentialRevoked(credentialHash, msg.sender);
@@ -50,7 +54,7 @@ contract RevocationRegistry {
 
     /// @notice 復原撤銷（僅原綁定 issuer）
     function unrevoke(bytes32 credentialHash) external {
-        require(issuerOf[credentialHash] == msg.sender, "RevocationRegistry: not issuer");
+        if (issuerOf[credentialHash] != msg.sender) revert NotCredentialIssuer();
         _revoked[credentialHash] = false;
         emit CredentialUnrevoked(credentialHash, msg.sender);
     }

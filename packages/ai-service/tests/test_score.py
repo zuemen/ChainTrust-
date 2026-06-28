@@ -128,3 +128,18 @@ def test_graph_features_absent_when_no_accounts():
     out = add_graph_features(pd.DataFrame([{"type": "PAYMENT", "amount": 100}]))
     assert out["payee_fan_in"].iloc[0] == 0.0
     assert out["account_graph_risk"].iloc[0] == 0.0
+
+
+def test_graph_apply_train_only_no_future_edges():
+    """以訓練期圖譜套用到測試列：fan_in 來自訓練邊，不因測試列新增而改變（防時間洩漏）。"""
+    import pandas as pd
+    from app.graph import compute_account_graph, apply_graph_features
+
+    train = pd.DataFrame([{"type": "TRANSFER", "nameOrig": f"C{i}", "nameDest": "COLL"} for i in range(6)])
+    graph = compute_account_graph(train)
+    # 測試列也匯入 COLL，但不應讓 fan_in 變大（圖譜只由 train 建）
+    test = pd.DataFrame([{"type": "TRANSFER", "nameOrig": "Cx", "nameDest": "COLL"}])
+    out = apply_graph_features(test, graph)
+    assert out["payee_fan_in"].iloc[0] == 6  # 僅來自訓練期的 6 個來源
+    # 測試列的新對手 Cx 不在訓練圖 → 該帳戶風險為 0
+    assert out["account_graph_risk"].iloc[0] == 0.0

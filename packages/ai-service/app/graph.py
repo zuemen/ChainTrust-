@@ -71,20 +71,25 @@ def compute_account_graph(df: pd.DataFrame) -> AccountGraph:
     return g
 
 
-def add_graph_features(df: pd.DataFrame) -> pd.DataFrame:
-    """把 payee_fan_in / account_graph_risk 併入每筆交易（訓練用）。"""
+def apply_graph_features(df: pd.DataFrame, graph: AccountGraph) -> pd.DataFrame:
+    """以「既有圖譜」把 payee_fan_in / account_graph_risk 併入每筆交易。
+
+    重點：圖譜可只由訓練期資料建立（見 train.py），再套用到 val/test，
+    避免用到未來邊造成時間洩漏（out-of-time 正確性）。
+    """
     df = df.copy()
     if not _has_account_cols(df):
         df["payee_fan_in"] = 0.0
         df["account_graph_risk"] = 0.0
         return df
-
-    g = compute_account_graph(df)
-    dests = df["nameDest"].astype(str)
-    origs = df["nameOrig"].astype(str)
-    df["payee_fan_in"] = dests.map(lambda d: float(g.fan_in.get(d, 0)))
-    df["account_graph_risk"] = origs.map(g.risk_of)
+    df["payee_fan_in"] = df["nameDest"].astype(str).map(lambda d: float(graph.fan_in.get(d, 0)))
+    df["account_graph_risk"] = df["nameOrig"].astype(str).map(graph.risk_of)
     return df
+
+
+def add_graph_features(df: pd.DataFrame) -> pd.DataFrame:
+    """便利函式：以自身建圖並併入特徵（單一 df 情境；訓練請用 train-only 圖譜 + apply）。"""
+    return apply_graph_features(df, compute_account_graph(df))
 
 
 def graph_features_for_row(row: Mapping, graph: AccountGraph | None) -> dict[str, float]:

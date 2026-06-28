@@ -33,7 +33,7 @@ HERE = os.path.dirname(__file__)
 sys.path.insert(0, HERE)
 
 from app.featurize import FEATURE_ORDER, featurize  # noqa: E402
-from app.graph import add_graph_features  # noqa: E402
+from app.graph import compute_account_graph, apply_graph_features  # noqa: E402
 
 DATA_CSV = os.path.join(HERE, "data", "paysim.csv")
 MODEL_OUT = os.path.join(HERE, "model.joblib")
@@ -60,8 +60,6 @@ def to_matrix(df: pd.DataFrame) -> np.ndarray:
 
 def main() -> None:
     df, source = load_data()
-    # A2：併入帳戶圖譜特徵（payee_fan_in / account_graph_risk）
-    df = add_graph_features(df)
     print(f"[train] 資料來源：{source}  rows={len(df)}  fraud={int(df['isFraud'].sum())}")
 
     # 依時間切分（out-of-time），避免洩漏
@@ -69,6 +67,12 @@ def main() -> None:
     n = len(df)
     tr_end, va_end = int(n * 0.7), int(n * 0.85)
     train, val, test = df[:tr_end], df[tr_end:va_end], df[va_end:]
+
+    # A2：帳戶圖譜「只用訓練期邊」建立，再套用到 val/test → 不用未來邊（避免時間洩漏）
+    graph = compute_account_graph(train)
+    train = apply_graph_features(train, graph)
+    val = apply_graph_features(val, graph)
+    test = apply_graph_features(test, graph)
 
     Xtr, ytr = to_matrix(train), train["isFraud"].to_numpy()
     Xva, yva = to_matrix(val), val["isFraud"].to_numpy()
@@ -132,8 +136,9 @@ def main() -> None:
     if roc >= 0.999:
         print("[train] ⚠ ROC-AUC≈1.0：極可能資料洩漏或過擬，請以 PR-AUC 與 out-of-time 為準")
 
-    # IsolationForest 用正常樣本訓練
-    iso = IsolationForest(n_estimators=200, contamination=0.06, random_state=42)
+    # IsolationForest 用正常樣本訓練；contamination 依實際詐欺率（夾在合理範圍）
+    contamination = float(min(0.2, max(0.01, ytr.mean())))
+    iso = IsolationForest(n_estimators=200, contamination=contamination, random_state=42)
     iso.fit(Xtr[ytr == 0])
     raw = -iso.score_samples(Xtr)
     amin, amax = float(np.percentile(raw, 1)), float(np.percentile(raw, 99))
@@ -168,6 +173,7 @@ def main() -> None:
         "rows": int(len(df)),
         "fraud": int(df["isFraud"].sum()),
         "primary_metric": "PR-AUC",
+        "fraud_prevalence": round(float(yte.mean()), 4),  # PR-AUC 的隨機基準線
         "holdout_pr_auc": round(float(pr_auc), 4),
         "holdout_roc_auc": round(float(roc), 4),
         "holdout_auc": round(float(roc), 4),  # 向後相容

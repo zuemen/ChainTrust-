@@ -37,7 +37,7 @@ describe("RevocationRegistry", () => {
     const { registry, outsider } = await deploy();
     await expect(
       registry.connect(outsider).revoke(HASH)
-    ).to.be.revertedWith("RevocationRegistry: untrusted issuer");
+    ).to.be.revertedWithCustomError(registry, "UntrustedIssuer");
     expect(await registry.isRevoked(HASH)).to.equal(false);
   });
 
@@ -55,7 +55,7 @@ describe("RevocationRegistry", () => {
     await registry.revoke(HASH); // 綁定為 signer0
     await expect(
       registry.connect(otherIssuer).revoke(HASH)
-    ).to.be.revertedWith("RevocationRegistry: not issuer");
+    ).to.be.revertedWithCustomError(registry, "NotCredentialIssuer");
   });
 
   it("非原 issuer 不可復原（revert）", async () => {
@@ -63,13 +63,13 @@ describe("RevocationRegistry", () => {
     await registry.revoke(HASH);
     await expect(
       registry.connect(otherIssuer).unrevoke(HASH)
-    ).to.be.revertedWith("RevocationRegistry: not issuer");
+    ).to.be.revertedWithCustomError(registry, "NotCredentialIssuer");
   });
 
   it("未被任何人撤銷的 hash 不可被非綁定者復原（revert）", async () => {
     const { registry, otherIssuer } = await deploy();
     await expect(
       registry.connect(otherIssuer).unrevoke(HASH)
-    ).to.be.revertedWith("RevocationRegistry: not issuer");
+    ).to.be.revertedWithCustomError(registry, "NotCredentialIssuer");
   });
 });

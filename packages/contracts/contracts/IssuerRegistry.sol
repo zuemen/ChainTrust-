@@ -12,11 +12,25 @@ contract IssuerRegistry is Ownable {
 
     event IssuerTrustChanged(address indexed issuer, bool trusted);
 
+    /// @notice issuer 位址不可為零地址
+    error ZeroIssuer();
+
     constructor() Ownable(msg.sender) {}
 
     /// @notice 設定/取消某 Issuer 的信任狀態（僅信任根 owner）
     function setTrustedIssuer(address issuer, bool trusted) external onlyOwner {
-        require(issuer != address(0), "IssuerRegistry: zero issuer");
+        _set(issuer, trusted);
+    }
+
+    /// @notice 批次設定信任狀態（一次背書多家銀行/機構，僅 owner）
+    function setTrustedIssuers(address[] calldata issuers, bool trusted) external onlyOwner {
+        for (uint256 i; i < issuers.length; ++i) {
+            _set(issuers[i], trusted);
+        }
+    }
+
+    function _set(address issuer, bool trusted) private {
+        if (issuer == address(0)) revert ZeroIssuer();
         _trusted[issuer] = trusted;
         emit IssuerTrustChanged(issuer, trusted);
     }

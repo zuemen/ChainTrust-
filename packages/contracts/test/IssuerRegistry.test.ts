@@ -46,6 +46,31 @@ describe("IssuerRegistry", () => {
     const { registry } = await deploy();
     await expect(
       registry.setTrustedIssuer(ethers.ZeroAddress, true)
-    ).to.be.revertedWith("IssuerRegistry: zero issuer");
+    ).to.be.revertedWithCustomError(registry, "ZeroIssuer");
+  });
+
+  it("批次信任多家機構並各發事件", async () => {
+    const { registry, issuer, other } = await deploy();
+    await expect(registry.setTrustedIssuers([issuer.address, other.address], true))
+      .to.emit(registry, "IssuerTrustChanged")
+      .withArgs(issuer.address, true)
+      .and.to.emit(registry, "IssuerTrustChanged")
+      .withArgs(other.address, true);
+    expect(await registry.isTrustedIssuer(issuer.address)).to.equal(true);
+    expect(await registry.isTrustedIssuer(other.address)).to.equal(true);
+  });
+
+  it("批次設定含 zero address 整筆 revert", async () => {
+    const { registry, issuer } = await deploy();
+    await expect(
+      registry.setTrustedIssuers([issuer.address, ethers.ZeroAddress], true)
+    ).to.be.revertedWithCustomError(registry, "ZeroIssuer");
+  });
+
+  it("非 owner 不可批次設定（revert）", async () => {
+    const { registry, issuer, other } = await deploy();
+    await expect(
+      registry.connect(other).setTrustedIssuers([issuer.address], true)
+    ).to.be.revertedWithCustomError(registry, "OwnableUnauthorizedAccount");
   });
 });

@@ -3,13 +3,14 @@
   "rows": 40000,
   "fraud": 3289,
   "primary_metric": "PR-AUC",
-  "holdout_pr_auc": 0.8564,
-  "holdout_roc_auc": 0.9179,
-  "holdout_auc": 0.9179,
+  "fraud_prevalence": 0.0802,
+  "holdout_pr_auc": 0.8554,
+  "holdout_roc_auc": 0.9156,
+  "holdout_auc": 0.9156,
   "recall_at_fpr_1pct": 0.8399,
-  "precision_at_100": 0.99,
+  "precision_at_100": 0.98,
   "mcc": 0.9052,
-  "threshold": 0.05,
+  "threshold": 0.13,
   "recall_at_threshold": 0.8399,
   "confusion_at_threshold": {
     "tp": 404,
@@ -22,51 +23,51 @@
   "top_feature_importances": [
     {
       "feature": "account_age_days",
-      "importance": 237
+      "importance": 572
     },
     {
       "feature": "errorBalanceDest",
-      "importance": 194
-    },
-    {
-      "feature": "newbalanceDest",
-      "importance": 188
-    },
-    {
-      "feature": "errorBalanceOrig",
-      "importance": 179
+      "importance": 475
     },
     {
       "feature": "vc_age_days",
-      "importance": 162
-    },
-    {
-      "feature": "oldbalanceDest",
-      "importance": 156
+      "importance": 467
     },
     {
       "feature": "drain_ratio",
-      "importance": 146
+      "importance": 426
+    },
+    {
+      "feature": "errorBalanceOrig",
+      "importance": 409
+    },
+    {
+      "feature": "newbalanceDest",
+      "importance": 408
     },
     {
       "feature": "payee_risk",
-      "importance": 144
+      "importance": 408
+    },
+    {
+      "feature": "oldbalanceDest",
+      "importance": 395
     },
     {
       "feature": "oldbalanceOrg",
-      "importance": 135
+      "importance": 336
     },
     {
       "feature": "newbalanceOrig",
-      "importance": 123
+      "importance": 307
     },
     {
       "feature": "amount",
-      "importance": 101
+      "importance": 272
     },
     {
       "feature": "tx_count_24h",
-      "importance": 71
+      "importance": 209
     }
   ]
 }
