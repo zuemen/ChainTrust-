@@ -79,3 +79,33 @@ def vectorize(row: Mapping[str, Any], feature_order: list[str] | None = None) ->
     order = feature_order or FEATURE_ORDER
     feats = featurize(row)
     return [float(feats.get(name, 0.0)) for name in order]
+
+
+# 特徵 → 中文標籤（供 /score 可解釋輸出）
+FEATURE_LABELS: dict[str, str] = {
+    "amount": "交易金額",
+    "oldbalanceOrg": "轉出前餘額",
+    "newbalanceOrig": "轉出後餘額",
+    "oldbalanceDest": "收款前餘額",
+    "newbalanceDest": "收款後餘額",
+    "errorBalanceOrig": "轉出帳務不一致",
+    "errorBalanceDest": "收款帳務不一致",
+    "tx_count_1h": "1 小時交易頻率",
+    "tx_count_24h": "24 小時交易頻率",
+    "vc_age_days": "憑證年齡",
+    "account_age_days": "帳戶年齡",
+    "cross_institution_presentations": "跨機構出示次數",
+    "payee_risk": "收款方風險",
+    "device_changed": "裝置變更",
+    "mobile_realname_verified": "門號實名（中華電信）",
+    "geo_jump": "地理位置跳躍",
+    "type_CASH_IN": "交易類型：存入",
+    "type_CASH_OUT": "交易類型：提領",
+    "type_DEBIT": "交易類型：扣款",
+    "type_PAYMENT": "交易類型：支付",
+    "type_TRANSFER": "交易類型：轉帳",
+}
+
+
+def feature_label(name: str) -> str:
+    return FEATURE_LABELS.get(name, name)

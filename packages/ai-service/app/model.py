@@ -1,12 +1,16 @@
-"""模型載入與評分；無模型時自動退回規則 baseline。"""
+"""模型載入與評分；無模型時自動退回規則 baseline。
+
+評分輸出含 top_factors（可解釋）：模型模式用 LightGBM 的 SHAP 貢獻（pred_contrib，
+不需額外相依），規則模式用觸發規則的權重排序。
+"""
 from __future__ import annotations
 
 import os
 from typing import Any, Mapping
 
-from .featurize import FEATURE_ORDER, vectorize
-from .rules import rule_risk, reason_codes
-from .schemas import ScoreResponse
+from .featurize import FEATURE_ORDER, vectorize, feature_label
+from .rules import rule_risk, reason_codes, WEIGHTS, REASON_LABELS
+from .schemas import ScoreResponse, TopFactor
 
 # 決策門檻（與 docs/ai-fraud-spec.md 一致）
 PASS_MAX = 40   # risk < 40 → pass
@@ -47,11 +51,43 @@ def decide(risk: int) -> str:
     return "pass"
 
 
+def _top_factors_from_model(bundle: dict, x: list[list[float]], k: int = 3) -> list[TopFactor]:
+    """用 LightGBM SHAP 貢獻取「推升風險」前 k 大特徵（log-odds 空間，正值=更像詐欺）。"""
+    try:
+        import numpy as np
+        booster = bundle["lgbm"].booster_
+        contrib = booster.predict(np.asarray(x, dtype=float), pred_contrib=True)[0]
+        order = bundle.get("feature_list", FEATURE_ORDER)
+        pairs = [(order[i], float(contrib[i])) for i in range(len(order))]
+        pairs.sort(key=lambda p: p[1], reverse=True)
+        return [
+            TopFactor(feature=f, label=feature_label(f), impact=round(v, 4))
+            for f, v in pairs[:k]
+            if v > 0
+        ]
+    except Exception:
+        return []
+
+
+def _top_factors_from_rules(codes: list[str], k: int = 3) -> list[TopFactor]:
+    ranked = sorted(codes, key=lambda c: WEIGHTS.get(c, 0), reverse=True)[:k]
+    return [
+        TopFactor(feature=c, label=REASON_LABELS.get(c, c), impact=float(WEIGHTS.get(c, 0)))
+        for c in ranked
+    ]
+
+
 def score(row: Mapping[str, Any]) -> ScoreResponse:
     bundle = _load()
     if bundle is None:
         risk, codes = rule_risk(row)
-        return ScoreResponse(risk=risk, decision=decide(risk), reasons=codes, source="rules")
+        return ScoreResponse(
+            risk=risk,
+            decision=decide(risk),
+            reasons=codes,
+            source="rules",
+            top_factors=_top_factors_from_rules(codes),
+        )
 
     feature_order = bundle.get("feature_list", FEATURE_ORDER)
     x = [vectorize(row, feature_order)]
@@ -76,6 +112,11 @@ def score(row: Mapping[str, Any]) -> ScoreResponse:
     if not codes and risk >= PASS_MAX:
         codes = ["MODEL_ANOMALY"]
 
+    # top_factors：優先用模型 SHAP 貢獻；取不到則退回規則權重
+    top = _top_factors_from_model(bundle, x)
+    if not top:
+        top = _top_factors_from_rules(codes)
+
     return ScoreResponse(
         risk=risk,
         decision=decide(risk),
@@ -83,4 +124,5 @@ def score(row: Mapping[str, Any]) -> ScoreResponse:
         source="model",
         p_fraud=round(p_fraud, 4),
         anomaly=round(anomaly_norm, 4),
+        top_factors=top,
     )

@@ -62,3 +62,14 @@ def test_rules_baseline_deterministic():
     risk_n, codes_n = rule_risk(normal)
     assert risk_m >= 70 and "MULE_PATTERN" in codes_m
     assert risk_n < 40 and codes_n == []
+
+
+def test_top_factors_present_and_shaped():
+    """可解釋輸出：人頭交易應回傳非空 top_factors，且每筆有 feature/label/impact。"""
+    mule = next(s for s in _samples() if s["label"] == "mule_transfer_drain")
+    body = client.post("/score", json=mule["ctx"]).json()
+    tf = body.get("top_factors")
+    assert isinstance(tf, list) and len(tf) >= 1
+    first = tf[0]
+    assert set(first.keys()) >= {"feature", "label", "impact"}
+    assert isinstance(first["label"], str) and first["label"]

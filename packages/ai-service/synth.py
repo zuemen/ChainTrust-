@@ -86,3 +86,36 @@ def generate(n: int = 40_000, fraud_ratio: float = 0.07, seed: int = 42) -> pd.D
     df.loc[flip, "isFraud"] = 1 - df.loc[flip, "isFraud"]
 
     return df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
+
+
+# 供 train.py 對「真 PaySim」補上 ChainTrust 增益訊號（PaySim 本身沒有這些欄位）。
+# 注意：半合成 —— 交易詐欺訊號來自真資料；電信/裝置/地理訊號為「與 isFraud 相關」的模擬注入。
+CHT_SIGNAL_COLS = [
+    "tx_count_1h", "tx_count_24h", "device_changed", "mobile_realname_verified",
+    "vc_age_days", "account_age_days", "cross_institution_presentations",
+    "payee_risk", "geo_jump",
+]
+
+
+def augment_cht_signals(df: pd.DataFrame, seed: int = 42) -> pd.DataFrame:
+    """以與 isFraud 相關的分佈注入 CHT 增益訊號，使模型能學到這些差異化特徵。"""
+    rng = np.random.default_rng(seed)
+    n = len(df)
+    f = (df["isFraud"].to_numpy() == 1) if "isFraud" in df.columns else np.zeros(n, dtype=bool)
+
+    def by_label(p_fraud: float, p_legit: float) -> np.ndarray:
+        return np.where(f, rng.random(n) < p_fraud, rng.random(n) < p_legit).astype(int)
+
+    df = df.copy()
+    df["device_changed"] = by_label(0.58, 0.08)
+    df["mobile_realname_verified"] = by_label(0.22, 0.92)
+    df["geo_jump"] = by_label(0.50, 0.06)
+    df["payee_risk"] = np.clip(
+        np.where(f, rng.normal(0.68, 0.17, n), rng.normal(0.18, 0.14, n)), 0, 1
+    )
+    df["account_age_days"] = np.where(f, rng.integers(0, 45, n), rng.integers(30, 2000, n))
+    df["vc_age_days"] = np.where(f, rng.integers(0, 75, n), rng.integers(20, 1000, n))
+    df["cross_institution_presentations"] = np.where(f, rng.integers(3, 18, n), rng.integers(0, 7, n))
+    df["tx_count_1h"] = np.where(f, rng.integers(2, 12, n), rng.integers(0, 5, n))
+    df["tx_count_24h"] = np.where(f, rng.integers(10, 55, n), rng.integers(0, 15, n))
+    return df

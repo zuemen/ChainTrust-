@@ -36,6 +36,13 @@ class ScoreRequest(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class TopFactor(BaseModel):
+    """單一可解釋因素：feature 識別字、中文標籤、推升風險的貢獻值。"""
+    feature: str
+    label: str
+    impact: float
+
+
 class ScoreResponse(BaseModel):
     risk: int = Field(ge=0, le=100, description="0-100 風險分數")
     decision: Decision
@@ -43,3 +50,5 @@ class ScoreResponse(BaseModel):
     source: Literal["model", "rules"] = "rules"
     p_fraud: float | None = None
     anomaly: float | None = None
+    # 可解釋：本筆判斷的前幾大推升因素
+    top_factors: list[TopFactor] = Field(default_factory=list)

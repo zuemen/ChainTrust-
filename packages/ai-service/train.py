@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -28,22 +29,17 @@ from app.featurize import FEATURE_ORDER, featurize  # noqa: E402
 DATA_CSV = os.path.join(HERE, "data", "paysim.csv")
 MODEL_OUT = os.path.join(HERE, "model.joblib")
 
-AUGMENT_DEFAULTS = {
-    "tx_count_1h": 0, "tx_count_24h": 0, "device_changed": 0,
-    "mobile_realname_verified": 1, "vc_age_days": 365, "account_age_days": 365,
-    "cross_institution_presentations": 0, "payee_risk": 0.0, "geo_jump": 0,
-}
-
-
 def load_data() -> tuple[pd.DataFrame, str]:
     if os.path.exists(DATA_CSV):
         df = pd.read_csv(DATA_CSV)
-        for k, v in AUGMENT_DEFAULTS.items():
-            if k not in df.columns:
-                df[k] = v
+        # PaySim 沒有電信/裝置/地理等 ChainTrust 增益訊號 → 以與 isFraud 相關方式半合成注入，
+        # 讓模型能學到這些差異化特徵（交易詐欺訊號仍為真資料）。
+        from synth import augment_cht_signals, CHT_SIGNAL_COLS
+        if not all(c in df.columns for c in CHT_SIGNAL_COLS):
+            df = augment_cht_signals(df)
         if "step" not in df.columns:
             df["step"] = np.arange(len(df))
-        return df, f"PaySim ({DATA_CSV})"
+        return df, f"PaySim + 半合成 CHT 訊號 ({DATA_CSV})"
     from synth import generate
     return generate(), "synthetic (PaySim-like)"
 
@@ -118,6 +114,36 @@ def main() -> None:
         MODEL_OUT,
     )
     print(f"[train] 已存 {MODEL_OUT}")
+
+    # 指標與特徵重要度 → metrics.json（簡報圖表用）
+    pred_te = (proba >= best_thr).astype(int)
+    tp = int(((pred_te == 1) & (yte == 1)).sum())
+    fp = int(((pred_te == 1) & (yte == 0)).sum())
+    fn = int(((pred_te == 0) & (yte == 1)).sum())
+    tn = int(((pred_te == 0) & (yte == 0)).sum())
+    importances = sorted(
+        (
+            {"feature": FEATURE_ORDER[i], "importance": int(clf.feature_importances_[i])}
+            for i in range(len(FEATURE_ORDER))
+        ),
+        key=lambda d: d["importance"],
+        reverse=True,
+    )[:12]
+    metrics = {
+        "source": source,
+        "rows": int(len(df)),
+        "fraud": int(df["isFraud"].sum()),
+        "holdout_auc": round(float(auc), 4),
+        "holdout_pr_auc": round(float(pr_auc), 4),
+        "threshold": round(float(best_thr), 2),
+        "recall_at_threshold": round(float(recall), 4),
+        "confusion_at_threshold": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
+        "top_feature_importances": importances,
+    }
+    with open(os.path.join(HERE, "metrics.json"), "w", encoding="utf-8") as mf:
+        json.dump(metrics, mf, ensure_ascii=False, indent=2)
+    print("[train] 已存 metrics.json")
+
     if auc < 0.90:
         print(f"[train] ⚠ AUC<0.90（{auc:.4f}），資料訊號可能不足")
 

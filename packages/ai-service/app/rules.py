@@ -13,6 +13,20 @@ REASON_LABELS = {
     "NEW_ACCOUNT": "新開帳戶",
     "HIGH_PAYEE_RISK": "收款方高風險",
     "CROSS_INST_REUSE": "跨機構頻繁出示",
+    "MODEL_ANOMALY": "模型偵測到異常樣態",
+}
+
+# 規則風險權重（也用於 top_factors 排序）
+WEIGHTS = {
+    "MULE_PATTERN": 45,
+    "NO_REALNAME": 25,
+    "VELOCITY": 20,
+    "DEVICE_CHANGE": 10,
+    "GEO_JUMP": 10,
+    "NEW_ACCOUNT": 10,
+    "HIGH_PAYEE_RISK": 15,
+    "CROSS_INST_REUSE": 10,
+    "MODEL_ANOMALY": 30,
 }
 
 
@@ -51,17 +65,7 @@ def reason_codes(row: Mapping[str, Any]) -> list[str]:
 
 def rule_risk(row: Mapping[str, Any]) -> tuple[int, list[str]]:
     """規則風險分數（0-100）＋ reason codes。"""
-    weights = {
-        "MULE_PATTERN": 45,
-        "NO_REALNAME": 25,
-        "VELOCITY": 20,
-        "DEVICE_CHANGE": 10,
-        "GEO_JUMP": 10,
-        "NEW_ACCOUNT": 10,
-        "HIGH_PAYEE_RISK": 15,
-        "CROSS_INST_REUSE": 10,
-    }
     codes = reason_codes(row)
-    score = sum(weights.get(c, 0) for c in codes)
+    score = sum(WEIGHTS.get(c, 0) for c in codes)
     risk = max(0, min(100, int(round(score))))
     return risk, codes

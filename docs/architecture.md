@@ -9,7 +9,7 @@ ChainTrust 是一個 SSI 金融身分錢包 PoC，由四個信任角色與一條
 │  Issuers    │ ──────────▶ │ Holder 錢包   │ ───────────────▶ │  Verifier     │
 │ CHT門號電子卡 │             │ (did:key)     │                  │ 銀行 / 商家    │
 │ 銀行 KYC     │             │ React PWA     │                  │               │
-│ (did:ethr)  │             └──────────────┘                  └──────┬───────┘
+│ (did:key)   │             └──────────────┘                  └──────┬───────┘
 └──────┬──────┘                                                       │
        │ 由 CHT PublicCA 根背書                          驗章+查信任+查撤銷+AI風險
        │                                                              │
@@ -40,16 +40,17 @@ ChainTrust 是一個 SSI 金融身分錢包 PoC，由四個信任角色與一條
 ## 3. 鏈上合約設計
 
 ### IssuerRegistry
-- `mapping(address => bool) trustedIssuer`（以 issuer 的鏈上位址索引，對應 did:ethr）。
+- `mapping(address => bool) trustedIssuer`（以 issuer 鏈上位址索引；位址由 did:key Secp256k1 公鑰推導，亦相容 did:ethr）。
 - `setTrustedIssuer(address issuer, bool trusted)` — 僅 owner（代表 CHT PublicCA 根）。
 - `isTrustedIssuer(address) view returns (bool)`。
 - 事件：`IssuerTrustChanged(address indexed issuer, bool trusted)`。
 
 ### RevocationRegistry
-- 撤銷以 `bytes32 credentialHash`（VC 的 statusListIndex / id 雜湊）為鍵。
-- `revoke(bytes32 credentialHash)` / `unrevoke(bytes32)` — 僅該 VC 的簽發者（記錄 `issuerOf`）。
+- 撤銷以 `bytes32 credentialHash`（VC id 的 keccak256 雜湊）為鍵。
+- 建構子帶入 `IssuerRegistry` 位址；**撤銷權綁定信任根**：僅受 `IssuerRegistry` 背書的簽發者可 `revoke`，首位撤銷者被記為 `issuerOf`，之後僅其可 `revoke/unrevoke`。未受信任的任意第三方無法撤銷 → 杜絕「知道 revocationKey 即可惡意撤銷他人有效憑證」。
 - `isRevoked(bytes32) view returns (bool)`。
-- 事件：`CredentialRevoked(bytes32 indexed hash, address indexed issuer)`。
+- 事件：`CredentialRevoked` / `CredentialUnrevoked(bytes32 indexed hash, address indexed issuer)`。
+- 殘留風險與後續：受信任簽發者集合內仍可能搶綁尚未撤銷之 hash；未來以「簽發時由 issuer 簽章綁定」強化。
 
 ## 4. 架構決策（ADR）
 
@@ -59,14 +60,14 @@ ChainTrust 是一個 SSI 金融身分錢包 PoC，由四個信任角色與一條
 ### ADR-002 PoC 鏈用 Polygon Amoy
 **決策**：PoC 部署 Polygon Amoy（chainId 80002）。**理由**：EVM 相容、水龍頭易取得、與 did:ethr 相容。**落地**：以相同合約介面遷移至 CHT BaaS，呼叫端不變。
 
-### ADR-003 DID 方法：Holder did:key、Issuer did:ethr
-**決策**：Holder 用 `did:key`（離線可生成、錢包友善、無需上鏈）；Issuer 用 `did:ethr`（位址可對應 `IssuerRegistry` 的鏈上信任查詢）。**理由**：信任查詢需鏈上位址，Holder 隱私需可離線生成。
+### ADR-003 DID 方法：Holder 與 Issuer 皆 did:key(Secp256k1)
+**決策**：Holder 與 Issuer 皆用 `did:key`（Secp256k1）。Issuer 的鏈上信任位址由其公鑰推導（`computeAddress(pubkey)`）並登記於 `IssuerRegistry`，亦相容 `did:ethr`。**理由**：did:key 離線可生成、錢包友善；以公鑰推導位址即可對應鏈上信任查詢，issuer 無需先上鏈。**取捨**：實作以 did:key 為主（與 `agent.ts` 一致）。
 
 ### ADR-004 選擇性揭露用 SD-JWT
 **決策**：VC 採 SD-JWT（`@veramo/credential-w3c` + SD-JWT plugin）。**理由**：金融個資需最小揭露，Verifier 只拿必要欄位，明文不落鏈。**取捨**：較 JWT-VC 複雜，但符合 PoC 核心價值。
 
 ### ADR-005 撤銷用鏈上 RevocationRegistry（非 StatusList2021）
-**決策**：PoC 以自建鏈上 `RevocationRegistry`（mapping 查詢）。**理由**：Demo 可即時鏈上撤銷、查詢直觀；StatusList2021 留作落地優化。
+**決策**：PoC 以自建鏈上 `RevocationRegistry`（mapping 查詢），且**撤銷權綁定 `IssuerRegistry` 信任根**（僅受背書簽發者可撤銷並綁定 `issuerOf`）。**理由**：Demo 可即時鏈上撤銷、查詢直觀，並避免任意第三方惡意撤銷；StatusList2021 與「簽發時簽章綁定」留作落地優化。
 
 ### ADR-006 AI 反詐先規則 baseline，後 ML
 **決策**：`/score` 先以可解釋規則（金額/頻率/裝置/人頭特徵）跑通，再以 `train.py`（LightGBM + IsolationForest）訓練 `model.joblib`，`model.py` 自動載入。**理由**：先打通 Demo 線、模型可後補且向後相容。

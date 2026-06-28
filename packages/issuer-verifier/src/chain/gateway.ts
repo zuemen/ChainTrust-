@@ -19,6 +19,8 @@ export interface ChainGateway {
 
 /**
  * 記憶體實作：鏡射合約語意，供離線 e2e / 單元測試使用。
+ * 註：此為單一操作者的 dev 鏡射，不強制 IssuerRegistry 信任檢查；
+ *     撤銷授權的真正強制在 RevocationRegistry 合約（見 contracts/ 與其測試）。
  */
 export class InMemoryChainGateway implements ChainGateway {
   private trusted = new Set<string>();

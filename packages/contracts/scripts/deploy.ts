@@ -35,8 +35,9 @@ async function main() {
   const issuerRegistryAddr = await issuerRegistry.getAddress();
   console.log(`[deploy] IssuerRegistry      => ${issuerRegistryAddr}`);
 
+  // RevocationRegistry 綁定 IssuerRegistry：只有受信任 issuer 能撤銷
   const RevocationRegistry = await ethers.getContractFactory("RevocationRegistry");
-  const revocationRegistry = await RevocationRegistry.deploy();
+  const revocationRegistry = await RevocationRegistry.deploy(issuerRegistryAddr);
   await revocationRegistry.waitForDeployment();
   const revocationRegistryAddr = await revocationRegistry.getAddress();
   console.log(`[deploy] RevocationRegistry  => ${revocationRegistryAddr}`);

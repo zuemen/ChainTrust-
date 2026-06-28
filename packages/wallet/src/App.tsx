@@ -247,6 +247,19 @@ export function App() {
                   {result.risk.reasons.map((rc) => <li key={rc}>{REASON_LABELS[rc] ?? rc}</li>)}
                 </ul>
               )}
+              {result.risk.top_factors && result.risk.top_factors.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <h4 style={{ margin: "8px 0 4px", fontSize: 13, opacity: 0.8 }}>AI 判斷主要依據</h4>
+                  <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+                    {result.risk.top_factors.map((f) => (
+                      <li key={f.feature} style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                        <span>{f.label}</span>
+                        <b style={{ fontVariantNumeric: "tabular-nums" }}>+{f.impact.toFixed(2)}</b>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
 

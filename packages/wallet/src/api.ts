@@ -15,11 +15,18 @@ export interface TxContext {
   cross_institution_presentations?: number;
 }
 
+export interface TopFactor {
+  feature: string;
+  label: string;
+  impact: number;
+}
+
 export interface RiskAssessment {
   risk: number | null;
   decision: "pass" | "review" | "block";
   reasons: string[];
   source: string;
+  top_factors?: TopFactor[];
 }
 
 export interface SdJwtVerifyResult {

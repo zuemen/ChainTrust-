@@ -1,21 +1,43 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @title RevocationRegistry — 憑證撤銷登記
-/// @notice 以 VC 的雜湊（credentialHash）為鍵記錄撤銷狀態。首次撤銷者被記為該 VC 的 issuer，
-///         之後僅該 issuer 可再撤銷/復原。Verifier 查 isRevoked() 判斷 VC 是否已撤銷。
+interface IIssuerRegistry {
+    function isTrustedIssuer(address issuer) external view returns (bool);
+}
+
+/// @title RevocationRegistry — 憑證撤銷登記（撤銷權綁定信任根）
+/// @notice 撤銷權僅限「受 IssuerRegistry（中華電信 PublicCA 根）背書的簽發者」。
+///         首位撤銷某 VC 的受信任 issuer 被記為該 VC 的 issuer，之後僅其可 revoke/unrevoke。
+///         未受信任的任意第三方無法撤銷任何 VC —— 杜絕「知道 revocationKey 即可惡意撤銷他人有效憑證」的攻擊。
 contract RevocationRegistry {
+    /// @notice 信任根登記（用於授權撤銷者）
+    IIssuerRegistry public immutable issuerRegistry;
+
     /// @dev credentialHash => 是否已撤銷
     mapping(bytes32 => bool) private _revoked;
 
-    /// @notice credentialHash => 首次操作（撤銷）此 VC 的 issuer 位址
+    /// @notice credentialHash => 綁定的 issuer（首位撤銷此 VC 的受信任簽發者）
     mapping(bytes32 => address) public issuerOf;
 
     event CredentialRevoked(bytes32 indexed credentialHash, address indexed issuer);
     event CredentialUnrevoked(bytes32 indexed credentialHash, address indexed issuer);
 
-    /// @notice 撤銷一張 VC。首次呼叫者被綁定為該 VC 的 issuer。
-    function revoke(bytes32 credentialHash) external {
+    constructor(address issuerRegistry_) {
+        require(issuerRegistry_ != address(0), "RevocationRegistry: zero registry");
+        issuerRegistry = IIssuerRegistry(issuerRegistry_);
+    }
+
+    /// @dev 僅信任根背書的簽發者可呼叫
+    modifier onlyTrustedIssuer() {
+        require(
+            issuerRegistry.isTrustedIssuer(msg.sender),
+            "RevocationRegistry: untrusted issuer"
+        );
+        _;
+    }
+
+    /// @notice 撤銷一張 VC。首位撤銷者必須是受信任簽發者，並被綁定為該 VC 的 issuer。
+    function revoke(bytes32 credentialHash) external onlyTrustedIssuer {
         address issuer = issuerOf[credentialHash];
         if (issuer == address(0)) {
             issuerOf[credentialHash] = msg.sender;
@@ -26,7 +48,7 @@ contract RevocationRegistry {
         emit CredentialRevoked(credentialHash, msg.sender);
     }
 
-    /// @notice 復原撤銷（僅原 issuer）
+    /// @notice 復原撤銷（僅原綁定 issuer）
     function unrevoke(bytes32 credentialHash) external {
         require(issuerOf[credentialHash] == msg.sender, "RevocationRegistry: not issuer");
         _revoked[credentialHash] = false;
