@@ -87,6 +87,16 @@ pnpm test             # 跑所有 JS/TS 套件測試
 - [`docs/amoy-deploy-checklist.md`](docs/amoy-deploy-checklist.md) — Amoy 測試網部署清單
 - [`CLAUDE.md`](CLAUDE.md) — 專案脈絡與開發規範（給 Claude Code）
 
+## 最近更新（`we1n` 分支 · 2026-07-02）
+
+> 完整的完整度分析、P0/P1/P2 待辦與逐項執行日誌見 [`docs/completeness-roadmap.md`](docs/completeness-roadmap.md)。
+
+- **普惠金融線補位**：新增 `FinancialReputationCredential` —— 電信繳費史（CHT adapter mock）→ 可攜財務信譽 VC（SD-JWT）→ 錢包「繳費信譽憑證」卡 + 「微型貸款平台」出示情境（只揭露信譽等級、無需聯徵）。SD-JWT 驗證管線泛化為述詞注入，KYC 與信譽共用。
+- **「為什麼需要鏈」論述**：進 [`docs/architecture.md`](docs/architecture.md)（跨機構中立性／不可竄改稽核／可攜抗單點 + 鏈上最小化原則）。
+- **台灣防詐政策對齊**：[`docs/ai-fraud-spec.md`](docs/ai-fraud-spec.md) 新增政策對照（打詐綱領、詐欺犯罪危害防制條例、警示帳戶每日 1 萬限額）；`demo_data.json` 加「限額規避」案例（9,900 多筆），規則/模型雙路徑攔截。
+- **真 PaySim 實測（重要發現）**：635 萬筆、詐欺率 0.13%。PaySim 餘額欄位近決定性 → 指標飽和（PR-AUC 0.998、邏輯迴歸同分）、CHT 增益歸零、且誤放行已實名過水帳戶。**demo 模型維持合成 hard-mode 訓練**，真資料指標歸檔於 `packages/ai-service/metrics.paysim-real.json`，詳見 [`docs/DEMO.md`](docs/DEMO.md) 誠實聲明。
+- 測試現況：合約 16、issuer-verifier 21、ai-service 20 全綠；e2e 含普惠步驟 [9][10] 全過。
+
 ## 狀態
 
 PoC 開發中。所有「中華電信整合點」目前為 **mock**，正式落地時以對應的 CHT 產品（PublicCA／門號電子卡／BaaS／CHT Security 情資／Hami Pay）替換。**僅使用 testnet，請勿提交任何私鑰或機密。**

@@ -40,8 +40,8 @@ venv/
 .ruff_cache/
 *.joblib
 *.pkl
-data/raw/
-data/*.csv
+**/data/raw/
+**/data/*.csv
 
 # === Veramo / SSI 本地資料庫 (含金鑰) ===
 **/*.sqlite

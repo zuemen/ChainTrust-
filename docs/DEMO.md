@@ -54,6 +54,7 @@ docker compose up --build          # → http://localhost:5173
 
 - **模型需先訓練**：`model.joblib` 與 `metrics.json` 不入庫，首次請跑 `pnpm ai:train` 產生；未訓練時 `/score` 會自動退回**可解釋規則 baseline**（demo 仍可跑）。
 - **半合成資料**：無 Kaggle 時用合成 PaySim-like 資料。即使改用**真 PaySim**，其交易詐欺訊號為真，但電信/裝置/地理（門號實名、device_changed、geo_jump…）為**與 isFraud 相關的半合成注入**（PaySim 無這些欄位，見 `synth.py: augment_cht_signals`）。
+- **真 PaySim 實測結果（2026-07 已跑，見 `metrics.paysim-real.json`）**：635 萬筆、詐欺率 0.13%（真實比例）。但 PaySim 模擬器的餘額欄位**近乎決定性**標記詐欺（詐欺列固定「轉出即歸零」），導致指標飽和（PR-AUC 0.998、ROC≈1.0、邏輯迴歸同分）且 **CHT 訊號增益無從展現**；該模型還把「已實名的過水帳戶」誤放行（背了模擬器 artifact、泛化更差）。因此 **demo 模型維持合成 hard-mode 資料訓練**——刻意去掉決定性金流訊號，才能誠實展示「金流訊號不足時，身分訊號的邊際價值（+16.45% PR-AUC）」。
 - **指標以 PR-AUC 為準**（極度不平衡，勿看 accuracy）；ROC-AUC≈1.0 會被視為洩漏並警示。`metrics.json` 另含 recall@FPR1%/precision@100/MCC/混淆矩陣。
 - **安全**：mutating 端點（`/issue/*`、`/sdjwt/issue`、`/revoke`）可設 `API_KEY` 強制 `X-API-Key`；CORS 由 `CORS_ORIGIN` 收斂（見 `.env.example`）。
 
