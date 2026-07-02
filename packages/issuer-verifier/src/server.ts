@@ -8,7 +8,13 @@ import {
 } from "./chain/gateway.js";
 import { issueKYCCredential, issueMobileRealNameCredential, revocationKeyOf } from "./issuer.js";
 import { verifyCredential, verifyAndScore } from "./verifier.js";
-import { issueKycSdJwt, presentKycWithKeyBinding, verifyKycSdJwtPresentation } from "./sdjwt.js";
+import {
+  issueKycSdJwt,
+  issueReputationSdJwt,
+  presentKycWithKeyBinding,
+  verifyKycSdJwtPresentation,
+  verifyReputationSdJwtPresentation,
+} from "./sdjwt.js";
 import { randomUUID } from "crypto";
 import { scoreTransaction, fetchMetrics } from "./fraud.js";
 import { issuerAddressFromIdentifier } from "./credentialHash.js";
@@ -85,6 +91,18 @@ async function main() {
     }
   });
 
+  // 普惠金融：以電信繳費紀錄簽發 FinancialReputationCredential（SD-JWT）
+  app.post("/sdjwt/issue-reputation", requireApiKey, async (req, res) => {
+    try {
+      let { holderDid, msisdn } = req.body ?? {};
+      if (!holderDid) holderDid = (await createHolderDid(agent, `holder-${Date.now()}`)).did;
+      const vc = await issueReputationSdJwt({ issuer, holderDid, msisdn }, agent);
+      res.json({ vc, holderDid, issuerDid: issuer.did });
+    } catch (e: any) {
+      serverError(res, e);
+    }
+  });
+
   // 階段 B：驗證方核發一次性 nonce（防重放）。aud = 本驗證方識別。
   const VERIFIER_AUD = config.verifierAud;
   const issuedNonces = new Set<string>();
@@ -116,7 +134,7 @@ async function main() {
   // 驗證 SD-JWT 出示（含 key binding）+ AI 風險評分 → 綜合 outcome
   app.post("/sdjwt/verify", async (req, res) => {
     try {
-      const { presentation, tx, requireKeyBinding, expectedNonce } = req.body ?? {};
+      const { presentation, tx, kind, requireKeyBinding, expectedNonce } = req.body ?? {};
       if (!presentation) return res.status(400).json({ error: "缺 presentation" });
       // 若帶 expectedNonce，驗其為本方核發且未用過（一次性）
       if (expectedNonce != null && !issuedNonces.has(expectedNonce)) {
@@ -125,12 +143,16 @@ async function main() {
           outcome: "reject",
         });
       }
-      const verify = await verifyKycSdJwtPresentation(chain, presentation, {
-        minKycLevel: 2,
+      const kbOpts = {
         requireKeyBinding: requireKeyBinding === true,
         expectedAud: requireKeyBinding === true ? VERIFIER_AUD : undefined,
         expectedNonce: expectedNonce ?? undefined,
-      });
+      };
+      // kind=reputation → 普惠信譽述詞（reputationTier>=2）；預設 KYC 述詞（kycLevel>=2）
+      const verify =
+        kind === "reputation"
+          ? await verifyReputationSdJwtPresentation(chain, presentation, { minTier: 2, ...kbOpts })
+          : await verifyKycSdJwtPresentation(chain, presentation, { minKycLevel: 2, ...kbOpts });
       if (verify.ok && expectedNonce != null) issuedNonces.delete(expectedNonce); // 消耗 nonce
       let risk;
       let outcome: "approve" | "review" | "reject" = "reject";

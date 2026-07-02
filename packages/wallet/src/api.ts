@@ -102,11 +102,23 @@ export async function issueKyc(subject?: Record<string, unknown>): Promise<{
   return postJson("/sdjwt/issue", { subject });
 }
 
+/** 普惠金融：以電信繳費紀錄申請財務信譽 VC（同一 holderDid 可與 KYC 憑證共存） */
+export async function issueReputation(holderDid?: string): Promise<{
+  vc: string;
+  holderDid: string;
+  issuerDid: string;
+}> {
+  return postJson("/sdjwt/issue-reputation", { holderDid });
+}
+
+export type PresentationKind = "kyc" | "reputation";
+
 export async function verifyPresentation(
   presentation: string,
-  tx: TxContext
+  tx: TxContext,
+  kind: PresentationKind = "kyc"
 ): Promise<VerifyResponse> {
-  return postJson("/sdjwt/verify", { presentation, tx });
+  return postJson("/sdjwt/verify", { presentation, tx, kind });
 }
 
 export async function getMetrics(): Promise<MetricsResponse> {

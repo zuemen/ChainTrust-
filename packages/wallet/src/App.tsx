@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   issueKyc,
+  issueReputation,
   verifyPresentation,
   health,
   getMetrics,
   type TxContext,
   type VerifyResponse,
   type ModelMetrics,
+  type PresentationKind,
 } from "./api.ts";
 import { parseSdJwt, buildPresentation, type ParsedSdJwt } from "./sdjwt.ts";
 
 const VC_KEY = "chaintrust.vc";
+const REP_KEY = "chaintrust.repvc";
 
 // claim 中文標籤與是否屬敏感個資
 const CLAIM_LABELS: Record<string, { label: string; pii: boolean }> = {
@@ -19,7 +22,14 @@ const CLAIM_LABELS: Record<string, { label: string; pii: boolean }> = {
   country: { label: "國籍", pii: true },
   fullName: { label: "真實姓名", pii: true },
   birthDate: { label: "出生日期", pii: true },
+  // 普惠信譽憑證：等級可揭露，繳費明細屬敏感資料
+  reputationTier: { label: "信譽等級", pii: false },
+  tenureMonths: { label: "門號在網月數", pii: true },
+  onTimeRatio: { label: "準時繳費比例", pii: true },
+  avgMonthlyBillBand: { label: "月均帳單區間", pii: true },
 };
+
+const TIER_LABELS: Record<number, string> = { 3: "3（優良）", 2: "2（良好）", 1: "1（待累積）" };
 
 const REASON_LABELS: Record<string, string> = {
   MULE_PATTERN: "人頭金流樣態（大額轉出後帳戶清空）",
@@ -63,7 +73,18 @@ const SCENARIOS: Record<string, { title: string; desc: string; tx: TxContext }> 
   },
 };
 
-const REQUIRED_CLAIM = "kycLevel"; // 述詞 kycLevel>=2 必需
+// 普惠情境：微型貸款撥款（小額、已實名，AI 照常評分把關普惠通道）
+const MICROLOAN_TX: TxContext = {
+  type: "CASH_IN", amount: 30000, oldbalanceOrg: 8000, newbalanceOrig: 38000,
+  mobile_realname_verified: true, account_age_days: 540, payee_risk: 0.02,
+  tx_count_1h: 1, tx_count_24h: 2,
+};
+
+// 各出示情境的必要 claim（述詞用，不可取消勾選）
+const REQUIRED_BY_KIND: Record<PresentationKind, string> = {
+  kyc: "kycLevel",
+  reputation: "reputationTier",
+};
 
 type Stage = "wallet" | "consent" | "result";
 
@@ -71,9 +92,11 @@ export function App() {
   const [issuerDid, setIssuerDid] = useState<string>("");
   const [online, setOnline] = useState<boolean | null>(null);
   const [vc, setVc] = useState<string | null>(() => localStorage.getItem(VC_KEY));
+  const [repVc, setRepVc] = useState<string | null>(() => localStorage.getItem(REP_KEY));
   const [holderDid, setHolderDid] = useState<string>(() => localStorage.getItem("chaintrust.holder") ?? "");
   const [scenario, setScenario] = useState<keyof typeof SCENARIOS>("normal");
-  const [reveal, setReveal] = useState<Set<string>>(new Set([REQUIRED_CLAIM]));
+  const [requestKind, setRequestKind] = useState<PresentationKind>("kyc");
+  const [reveal, setReveal] = useState<Set<string>>(new Set([REQUIRED_BY_KIND.kyc]));
   const [stage, setStage] = useState<Stage>("wallet");
   const [result, setResult] = useState<VerifyResponse | null>(null);
   const [busy, setBusy] = useState(false);
@@ -84,6 +107,14 @@ export function App() {
     if (!vc) return null;
     try { return parseSdJwt(vc); } catch { return null; }
   }, [vc]);
+
+  const parsedRep: ParsedSdJwt | null = useMemo(() => {
+    if (!repVc) return null;
+    try { return parseSdJwt(repVc); } catch { return null; }
+  }, [repVc]);
+
+  const activeParsed = requestKind === "reputation" ? parsedRep : parsed;
+  const requiredClaim = REQUIRED_BY_KIND[requestKind];
 
   useEffect(() => {
     health().then((h) => { setOnline(h.ok); setIssuerDid(h.issuerDid); }).catch(() => setOnline(false));
@@ -101,13 +132,39 @@ export function App() {
     finally { setBusy(false); }
   }
 
+  async function handleIssueRep() {
+    setBusy(true); setError("");
+    try {
+      const r = await issueReputation(holderDid || undefined);
+      localStorage.setItem(REP_KEY, r.vc);
+      if (!holderDid) {
+        localStorage.setItem("chaintrust.holder", r.holderDid);
+        setHolderDid(r.holderDid);
+      }
+      setRepVc(r.vc);
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    finally { setBusy(false); }
+  }
+
   function handleForget() {
     localStorage.removeItem(VC_KEY);
     setVc(null); setResult(null); setStage("wallet");
   }
 
+  function handleForgetRep() {
+    localStorage.removeItem(REP_KEY);
+    setRepVc(null); setResult(null); setStage("wallet");
+  }
+
+  function openConsent(kind: PresentationKind) {
+    setRequestKind(kind);
+    setReveal(new Set([REQUIRED_BY_KIND[kind]]));
+    setResult(null);
+    setStage("consent");
+  }
+
   function toggleReveal(claim: string) {
-    if (claim === REQUIRED_CLAIM) return; // 必需，不可取消
+    if (claim === requiredClaim) return; // 必需，不可取消
     setReveal((prev) => {
       const next = new Set(prev);
       next.has(claim) ? next.delete(claim) : next.add(claim);
@@ -116,17 +173,18 @@ export function App() {
   }
 
   async function handlePresent() {
-    if (!parsed) return;
+    if (!activeParsed) return;
     setBusy(true); setError("");
     try {
-      const presentation = buildPresentation(parsed, [...reveal]);
-      const res = await verifyPresentation(presentation, SCENARIOS[scenario].tx);
+      const presentation = buildPresentation(activeParsed, [...reveal]);
+      const tx = requestKind === "reputation" ? MICROLOAN_TX : SCENARIOS[scenario].tx;
+      const res = await verifyPresentation(presentation, tx, requestKind);
       setResult(res); setStage("result");
     } catch (e: any) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }
 
-  const disclosableClaims = parsed?.disclosures.map((d) => d.claim) ?? [];
+  const disclosableClaims = activeParsed?.disclosures.map((d) => d.claim) ?? [];
 
   return (
     <div className="app">
@@ -167,7 +225,7 @@ export function App() {
             <div className="chips">
               {parsed.disclosures.map((d) => (
                 <span key={d.claim} className={`chip ${CLAIM_LABELS[d.claim]?.pii ? "pii" : ""}`}>
-                  {CLAIM_LABELS[d.claim]?.label ?? d.claim}：<b>{fmt(d.value)}</b>
+                  {CLAIM_LABELS[d.claim]?.label ?? d.claim}：<b>{fmtClaim(d.claim, d.value)}</b>
                 </span>
               ))}
             </div>
@@ -176,7 +234,38 @@ export function App() {
         )}
       </section>
 
-      {/* 出示請求 */}
+      {/* 普惠信譽憑證 */}
+      <section className="card">
+        <div className="card-h"><h2>繳費信譽憑證</h2><span className="tag">發證：中華電信（普惠金融）</span></div>
+        {!parsedRep ? (
+          <div className="empty">
+            <p>沒有聯徵信用紀錄？你的<b>電信繳費史</b>就是可攜的財務信譽。<br />
+              向 <b>中華電信</b> 申請繳費信譽憑證（明細留在錢包，出示時只揭露等級）。</p>
+            <button className="btn primary" disabled={busy || !online} onClick={handleIssueRep}>
+              {busy ? "申請中…" : "向中華電信申請 繳費信譽憑證"}
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div className="cred">
+              <div className="cred-row"><span>類型</span><b>FinancialReputationCredential（SD-JWT）</b></div>
+              <div className="cred-row"><span>發證者</span><code title={String(parsedRep.payload.iss)}>{shortDid(String(parsedRep.payload.iss))}</code></div>
+              <div className="cred-row"><span>資料來源</span><b>{String(parsedRep.payload.carrier ?? "中華電信")}</b></div>
+            </div>
+            <p className="hint">🔒 繳費明細只存在你的錢包，出示時預設只揭露信譽等級：</p>
+            <div className="chips">
+              {parsedRep.disclosures.map((d) => (
+                <span key={d.claim} className={`chip ${CLAIM_LABELS[d.claim]?.pii ? "pii" : ""}`}>
+                  {CLAIM_LABELS[d.claim]?.label ?? d.claim}：<b>{fmtClaim(d.claim, d.value)}</b>
+                </span>
+              ))}
+            </div>
+            <button className="btn ghost" onClick={handleForgetRep}>刪除憑證</button>
+          </div>
+        )}
+      </section>
+
+      {/* 出示請求：銀行 B / 商家（KYC） */}
       <section className="card">
         <div className="card-h"><h2>出示請求</h2><span className="tag">來自：銀行 B / 商家（Verifier）</span></div>
         <p>對方要求證明：<b>已完成 KYC（等級 ≥ 2）</b>。<br />
@@ -189,13 +278,24 @@ export function App() {
             </label>
           ))}
         </div>
-        <button className="btn primary" disabled={!parsed || !online} onClick={() => { setStage("consent"); setResult(null); }}>
+        <button className="btn primary" disabled={!parsed || !online} onClick={() => openConsent("kyc")}>
+          檢視將揭露的資料 →
+        </button>
+      </section>
+
+      {/* 出示請求：微型貸款（普惠金融） */}
+      <section className="card">
+        <div className="card-h"><h2>出示請求</h2><span className="tag">來自：微型貸款平台（普惠金融）</span></div>
+        <p>對方要求證明：<b>繳費信譽等級 ≥ 2</b> —— <b>無需聯徵紀錄</b>。<br />
+          你只揭露信譽等級，在網月數、繳費比例等明細<b>留在錢包</b>。</p>
+        {!parsedRep && <p className="hint">先在上方申請「繳費信譽憑證」。</p>}
+        <button className="btn primary" disabled={!parsedRep || !online} onClick={() => openConsent("reputation")}>
           檢視將揭露的資料 →
         </button>
       </section>
 
       {/* 最小揭露同意 */}
-      {stage === "consent" && parsed && (
+      {stage === "consent" && activeParsed && (
         <div className="modal-bg" onClick={() => setStage("wallet")}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>最小揭露同意</h2>
@@ -204,7 +304,7 @@ export function App() {
               {disclosableClaims.map((claim) => {
                 const meta = CLAIM_LABELS[claim] ?? { label: claim, pii: false };
                 const checked = reveal.has(claim);
-                const required = claim === REQUIRED_CLAIM;
+                const required = claim === requiredClaim;
                 return (
                   <label key={claim} className={`consent-row ${checked ? "on" : ""}`}>
                     <input type="checkbox" checked={checked} disabled={required} onChange={() => toggleReveal(claim)} />
@@ -229,12 +329,15 @@ export function App() {
       {/* 結果 */}
       {stage === "result" && result && (
         <section className="card result">
-          <Outcome r={result} />
+          <Outcome r={result} kind={requestKind} />
           <div className="checks">
             <Check ok={result.verify.checks.signature} label="簽章有效" />
             <Check ok={result.verify.checks.trustedIssuer} label="發證者受信任根背書" />
             <Check ok={result.verify.checks.notRevoked} label="憑證未被撤銷" />
-            <Check ok={result.verify.checks.predicate} label="KYC 等級 ≥ 2" />
+            <Check
+              ok={result.verify.checks.predicate}
+              label={requestKind === "reputation" ? "繳費信譽等級 ≥ 2" : "KYC 等級 ≥ 2"}
+            />
           </div>
 
           <div className="seen">
@@ -352,9 +455,11 @@ function ModelTrust({ m }: { m: ModelMetrics }) {
   );
 }
 
-function Outcome({ r }: { r: VerifyResponse }) {
+function Outcome({ r, kind }: { r: VerifyResponse; kind: PresentationKind }) {
+  const approveSub =
+    kind === "reputation" ? "繳費信譽良好，無需聯徵即可核貸" : "已完成 KYC 且風險低";
   const map = {
-    approve: { cls: "approve", icon: "✅", title: "驗證通過 · 交易放行", sub: "已完成 KYC 且風險低" },
+    approve: { cls: "approve", icon: "✅", title: kind === "reputation" ? "驗證通過 · 貸款核准" : "驗證通過 · 交易放行", sub: approveSub },
     review: { cls: "review", icon: "⚠️", title: "需人工複核", sub: "憑證有效，但交易風險偏高" },
     reject: { cls: "reject", icon: "⛔", title: "交易已攔截", sub: r.verify.ok ? "AI 判定高風險（疑似人頭/盜用）" : `憑證驗證失敗：${r.verify.reason ?? ""}` },
   }[r.outcome];
@@ -377,7 +482,9 @@ function shortDid(did?: string) {
   if (!did) return "—";
   return did.length > 24 ? `${did.slice(0, 16)}…${did.slice(-6)}` : did;
 }
-function fmt(v: unknown) {
+function fmtClaim(claim: string, v: unknown) {
+  if (claim === "reputationTier" && typeof v === "number") return TIER_LABELS[v] ?? String(v);
+  if (claim === "onTimeRatio" && typeof v === "number") return `${Math.round(v * 100)}%`;
   if (typeof v === "boolean") return v ? "是" : "否";
   return String(v);
 }
