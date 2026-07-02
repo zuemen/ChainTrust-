@@ -61,7 +61,7 @@ pnpm smoke
 各套件單獨啟動：
 
 ```shell
-pnpm contracts:test    # 合約測試（12）
+pnpm contracts:test    # 合約測試（16）
 pnpm iv:e2e            # 身分層 e2e（M1+M2.0）
 pnpm iv:dev            # issuer-verifier :3001
 pnpm ai:dev            # AI 反詐 :8000

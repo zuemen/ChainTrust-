@@ -7,7 +7,7 @@
 **方式 A：本機（已驗證）**
 ```shell
 pnpm install
-pnpm ai:setup && pnpm ai:train     # 首次：建 venv + 訓練模型（印 holdout AUC≈0.92）
+pnpm ai:setup && pnpm ai:train     # 首次：建 venv + 訓練模型（印 holdout PR-AUC，主指標）
 pnpm demo                          # 同時起 ai(:8000)+iv(:3001)+wallet(:5173)
 ```
 **方式 B：Docker（需 Docker Desktop 運行中）**

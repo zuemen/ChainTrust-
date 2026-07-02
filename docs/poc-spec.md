@@ -4,8 +4,8 @@
 
 ## 1. 環境需求
 
-- Node ≥ 20（本機 v25）、pnpm（本機 0.31）
-- Python 3.11
+- Node ≥ 20（本機 v24）、pnpm 9
+- Python ≥ 3.11（本機 3.13）
 - Polygon Amoy 測試錢包私鑰（放 `packages/contracts/.env`，**勿入庫**）+ 水龍頭代幣
 
 ## 2. 套件介面契約
