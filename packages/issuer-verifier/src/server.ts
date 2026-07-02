@@ -43,9 +43,26 @@ async function main() {
   const chain = await buildChain();
   const issuer = await createIssuerDid(agent);
   const issuerAddr = issuerAddressFromIdentifier(issuer);
-  // 記憶體模式下自動背書示範 issuer
+  // 自動背書示範 issuer：金鑰僅存記憶體，重啟後 issuer 位址必變，須重新背書。
+  // memory 模式直接設；ethers 模式需 CHAIN_PRIVATE_KEY 為 IssuerRegistry owner（PoC 中即 deployer）。
   if (config.chainMode === "memory") {
     await chain.setTrustedIssuer(issuerAddr, true);
+  } else if (config.chainPrivateKey) {
+    try {
+      await chain.setTrustedIssuer(issuerAddr, true);
+      console.log(`[issuer-verifier] 已於鏈上背書示範 issuer ${issuerAddr}`);
+    } catch (e) {
+      console.warn(
+        `[issuer-verifier] 鏈上背書示範 issuer 失敗（CHAIN_PRIVATE_KEY 非 IssuerRegistry owner？）。` +
+          `驗證將因 trustedIssuer=false 失敗，可改用 smoke:amoy 的 TRUST_ISSUER=${issuerAddr} 手動背書。`,
+        e
+      );
+    }
+  } else {
+    console.warn(
+      `[issuer-verifier] CHAIN_MODE=ethers 且未設 CHAIN_PRIVATE_KEY（唯讀）：` +
+        `示範 issuer ${issuerAddr} 未受鏈上信任，簽發後驗證會失敗；撤銷端點亦不可用。`
+    );
   }
 
   const app = express();
