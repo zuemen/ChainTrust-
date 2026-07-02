@@ -134,6 +134,25 @@ def test_pattern_reason_codes():
     assert "STRUCTURING" in reason_codes(st)
 
 
+# ── 台灣脈絡：警示帳戶每日限額（≤1 萬）規避 ──
+def test_taiwan_watchlist_limit_evasion():
+    """新制警示帳戶每日轉帳/提領 ≤ NT$1 萬；貼門檻下方的多筆小額（9,900）應觸發 STRUCTURING。"""
+    from app.featurize import featurize
+    from app.rules import rule_risk
+
+    ctx = next(s for s in _samples() if s["label"] == "watchlist_limit_evasion")["ctx"]
+    # 9,900 落在 10,000 門檻下方 5% 帶
+    assert featurize(ctx)["near_threshold"] == 1.0
+    # 規則 baseline 確定性：block 等級且含結構化/高頻
+    risk, codes = rule_risk(ctx)
+    assert risk >= 70
+    assert "STRUCTURING" in codes and "VELOCITY" in codes
+    # /score（模型或規則）皆應攔截
+    body = client.post("/score", json=ctx).json()
+    assert body["decision"] == "block"
+    assert "STRUCTURING" in body["reasons"]
+
+
 # ── A2：圖譜人頭環偵測 ──
 def test_account_graph():
     import pandas as pd
