@@ -84,18 +84,21 @@ pnpm test             # 跑所有 JS/TS 套件測試
 - [`docs/poc-spec.md`](docs/poc-spec.md) — PoC 技術規格（給開發者）
 - [`docs/DEMO.md`](docs/DEMO.md) — 現場 Demo 操作腳本
 - [`docs/ai-fraud-spec.md`](docs/ai-fraud-spec.md) — AI 反詐模組規格
+- [`docs/model-card.md`](docs/model-card.md) — 反詐模型 Model Card（訓練資料/限制/偏誤/治理）
 - [`docs/amoy-deploy-checklist.md`](docs/amoy-deploy-checklist.md) — Amoy 測試網部署清單
+- [`docs/completeness-roadmap.md`](docs/completeness-roadmap.md) — 完整度分析、P0/P1/P2 待辦、逐項執行日誌
 - [`CLAUDE.md`](CLAUDE.md) — 專案脈絡與開發規範（給 Claude Code）
 
-## 最近更新（`we1n` 分支 · 2026-07-02）
+## 最近更新（2026-07-21）
 
-> 完整的完整度分析、P0/P1/P2 待辦與逐項執行日誌見 [`docs/completeness-roadmap.md`](docs/completeness-roadmap.md)。
+> 完整的完整度分析、P0/P1/P2 待辦與逐項執行日誌（含日期）見 [`docs/completeness-roadmap.md`](docs/completeness-roadmap.md) §5。
 
-- **普惠金融線補位**：新增 `FinancialReputationCredential` —— 電信繳費史（CHT adapter mock）→ 可攜財務信譽 VC（SD-JWT）→ 錢包「繳費信譽憑證」卡 + 「微型貸款平台」出示情境（只揭露信譽等級、無需聯徵）。SD-JWT 驗證管線泛化為述詞注入，KYC 與信譽共用。
-- **「為什麼需要鏈」論述**：進 [`docs/architecture.md`](docs/architecture.md)（跨機構中立性／不可竄改稽核／可攜抗單點 + 鏈上最小化原則）。
-- **台灣防詐政策對齊**：[`docs/ai-fraud-spec.md`](docs/ai-fraud-spec.md) 新增政策對照（打詐綱領、詐欺犯罪危害防制條例、警示帳戶每日 1 萬限額）；`demo_data.json` 加「限額規避」案例（9,900 多筆），規則/模型雙路徑攔截。
-- **真 PaySim 實測（重要發現）**：635 萬筆、詐欺率 0.13%。PaySim 餘額欄位近決定性 → 指標飽和（PR-AUC 0.998、邏輯迴歸同分）、CHT 增益歸零、且誤放行已實名過水帳戶。**demo 模型維持合成 hard-mode 訓練**，真資料指標歸檔於 `packages/ai-service/metrics.paysim-real.json`，詳見 [`docs/DEMO.md`](docs/DEMO.md) 誠實聲明。
-- 測試現況：合約 16、issuer-verifier 21、ai-service 20 全綠；e2e 含普惠步驟 [9][10] 全過。
+- **反詐情資接進 `/score`**：新增 `ThreatIntelAdapter`/`MockThreatIntelAdapter`（`packages/issuer-verifier/src/adapters/cht.ts`），`scoreTransaction()` 依收款方識別碼查詢情資後併入請求；AI 服務新增 `THREAT_INTEL_HIT` 加權規則，規則模式與模型模式命中都會實際推動風險分數與決策。
+- **模型 Model Card + 治理文件**：新增 [`docs/model-card.md`](docs/model-card.md)——訓練資料、架構、指標、限制、**偏誤聲明**（反詐特徵可能懲罰無聯徵薄檔用戶，與普惠金融目標用戶重疊，此前未被記錄）、重訓節奏與漂移監控建議、人工審核責任分工。
+- **CHT 產品對應表補實查**：`docs/completeness-roadmap.md` §3.1 換成有來源、有日期的真實 CHT 產品調研（含 2026-07-01 甫發布的 MID+/GSMA Open Gateway 新聞稿），4 個 adapter 介面與 `ChainGateway` 加上目標產品與預期 API 形態的檔頭註記。發現 CHT 研究院已有遵循 W3C DID 標準的研發項目（與本專案架構高度一致），以及 HiPKI/ePKI 根憑證即將被 Chrome 撤銷信任的時效性風險。
+- **普惠金融線補位**：`FinancialReputationCredential` —— 電信繳費史（CHT adapter mock）→ 可攜財務信譽 VC（SD-JWT）→ 錢包「繳費信譽憑證」卡 + 「微型貸款平台」出示情境（只揭露信譽等級、無需聯徵）。
+- **真 PaySim 實測（重要發現）**：635 萬筆、詐欺率 0.13%。PaySim 餘額欄位近決定性 → 指標飽和，CHT 增益歸零、且誤放行已實名過水帳戶。**demo 模型維持合成 hard-mode 訓練**，詳見 [`docs/model-card.md`](docs/model-card.md) 與 [`docs/DEMO.md`](docs/DEMO.md) 誠實聲明。
+- 測試現況：合約 16、issuer-verifier 26、ai-service 22 全綠；e2e 含普惠步驟 [9][10] 全過。
 
 ## 狀態
 
