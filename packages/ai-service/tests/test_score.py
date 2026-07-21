@@ -233,3 +233,16 @@ def test_graph_apply_train_only_no_future_edges():
     assert out["payee_fan_in"].iloc[0] == 6  # 僅來自訓練期的 6 個來源
     # 測試列的新對手 Cx 不在訓練圖 → 該帳戶風險為 0
     assert out["account_graph_risk"].iloc[0] == 0.0
+
+
+# ── P1：ThreatIntelAdapter 情資命中規則 ──
+def test_threat_intel_hit_rule_and_weight():
+    """情資命中：reason_codes 應含 THREAT_INTEL_HIT，rule_risk 應加總其權重（規則 baseline 自動生效）。"""
+    from app.rules import reason_codes, rule_risk, WEIGHTS
+
+    assert reason_codes({"threat_intel_hit": False}) == []
+    assert "THREAT_INTEL_HIT" in reason_codes({"threat_intel_hit": True})
+
+    risk, codes = rule_risk({"threat_intel_hit": True})
+    assert risk == WEIGHTS["THREAT_INTEL_HIT"] == 35
+    assert codes == ["THREAT_INTEL_HIT"]
