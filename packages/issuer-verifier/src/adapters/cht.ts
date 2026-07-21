@@ -39,6 +39,11 @@ export interface BillingHistoryAdapter {
   getBillingSummary(msisdn: string): Promise<BillingSummary>;
 }
 
+export interface ThreatIntelAdapter {
+  /** 情資命中查詢（PoC：mock 比對小型內建黑名單；落地：CHT Security 情資 API） */
+  lookup(entityId: string): Promise<{ hit: boolean; source: string }>;
+}
+
 export class MockPublicCaAdapter implements PublicCaAdapter {
   async anchorIssuerRoot(issuerAddress: string) {
     return { anchored: true, rootAuthority: "CHT-PublicCA (mock)", ...{ issuerAddress } };
@@ -66,6 +71,20 @@ export class MockMobileCardAdapter implements MobileCardAdapter {
       carrier: "中華電信 (mock)",
       realName: "王小明",
       msisdnMasked: masked || "0912***678",
+    };
+  }
+}
+
+export class MockThreatIntelAdapter implements ThreatIntelAdapter {
+  private static readonly BLOCKLIST = new Set([
+    "TWQ-DEMO-MULE-001",
+    "TWQ-DEMO-MULE-002",
+  ]);
+
+  async lookup(entityId: string) {
+    return {
+      hit: MockThreatIntelAdapter.BLOCKLIST.has(entityId),
+      source: "CHT Security 情資 (mock)",
     };
   }
 }
