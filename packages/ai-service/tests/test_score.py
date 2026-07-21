@@ -246,3 +246,22 @@ def test_threat_intel_hit_rule_and_weight():
     risk, codes = rule_risk({"threat_intel_hit": True})
     assert risk == WEIGHTS["THREAT_INTEL_HIT"] == 35
     assert codes == ["THREAT_INTEL_HIT"]
+
+
+def test_threat_intel_hit_boosts_risk_and_reason():
+    """情資命中：模型模式下應把 pass 等級交易升級為 review，且加分獨立於模型判斷之外（可與 rules.WEIGHTS 對上）。"""
+    from app.rules import WEIGHTS
+
+    hit_ctx = next(s for s in _samples() if s["label"] == "threat_intel_hit_known_mule")["ctx"]
+    base_ctx = {k: v for k, v in hit_ctx.items() if k != "threat_intel_hit"}
+
+    base = client.post("/score", json=base_ctx).json()
+    hit = client.post("/score", json=hit_ctx).json()
+
+    assert base["decision"] == "pass"
+    assert "THREAT_INTEL_HIT" not in base["reasons"]
+
+    assert hit["decision"] == "review"
+    assert "THREAT_INTEL_HIT" in hit["reasons"]
+    assert hit["risk"] == base["risk"] + WEIGHTS["THREAT_INTEL_HIT"]
+    assert hit["top_factors"][0]["feature"] == "THREAT_INTEL_HIT"
