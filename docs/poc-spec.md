@@ -65,7 +65,7 @@ POST /score
 | :-- | :-- | :-- |
 | `PublicCaAdapter` | `anchorIssuerRoot()` | 直接回傳「已由 CHT 根背書」 |
 | `MobileCardAdapter` | `verifyMsisdn(msisdn)` | 回傳固定已驗證門號身分 |
-| `BaasAdapter` | 合約 provider 切換 | 預設指向 Amoy，落地切 CHT BaaS |
+| `BaasAdapter`（程式碼為 `ChainGateway`，見 `src/chain/gateway.ts`） | 合約 provider 切換 | 預設指向 Amoy，落地切 CHT BaaS（Ethereum 相容，見 `docs/completeness-roadmap.md` §3.1） |
 | `ThreatIntelAdapter` | `lookup(entity)` | 回傳 mock 情資命中分數 |
 
 ## 4. 里程碑驗收條件
